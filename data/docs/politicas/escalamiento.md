@@ -8,7 +8,7 @@ Antes de escalar, quien atiende el ticket debe dejar en el historial lo que ya r
 
 ## Prioridad alta
 
-Un ticket de prioridad alta afecta a clientes, cobros o la operación de un área completa: la pasarela de pagos sin servicio, el portal de proveedores caído o una ruta de distribución sin unidad asignada. Estos tickets se atienden las 24 horas y la guardia N1 debe confirmar la recepción en menos de 15 minutos.
+Un ticket de prioridad alta afecta a clientes, cobros o la operación de un área completa: la pasarela de pagos sin servicio, el portal de proveedores caído o una ruta de distribución sin unidad asignada. En el historial reciente son de este tipo el T-1042 (doble cargo a un cliente por la pasarela de pagos), el T-1043 (portal de proveedores caído) y el T-1009 (ruta norte sin unidad asignada). Estos tickets se atienden las 24 horas y la guardia N1 debe confirmar la recepción en menos de 15 minutos.
 
 La guardia N1 da seguimiento al proveedor cada hora y deja cada intento en el historial del ticket, con la hora y el medio de contacto: correo, teléfono o portal del proveedor. Si el proveedor no responde en 4 horas, escalar a Guardia N2 y avisar al dueño del servicio. La Guardia N2 decide si se activa un plan alternativo, como habilitar el pago por transferencia o contratar un transportista externo, y queda como responsable del ticket hasta cerrarlo.
 
@@ -18,7 +18,7 @@ Un ticket de prioridad media afecta a una persona o a un proceso que tiene alter
 
 ## Prioridad baja
 
-Un ticket de prioridad baja no detiene a nadie. Se escala a la Guardia N2 solo si pasan cinco días hábiles sin respuesta del proveedor. No se avisa al dueño del servicio.
+Un ticket de prioridad baja no detiene a nadie. Se escala a la Guardia N2 solo si pasan cinco días hábiles sin respuesta del proveedor. No se avisa al dueño del servicio. Al escalarlo, la guardia N1 deja en el historial la fecha de cada intento de contacto.
 
 ## Escalamiento a Guardia N3
 
