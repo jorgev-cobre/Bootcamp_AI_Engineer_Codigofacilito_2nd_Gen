@@ -12,6 +12,8 @@ Uso:
     uv run main.py --agent plan "Compara el T-1042 y el T-1014"
     uv run main.py --agent react --mcp "¿Cómo va el T-1042?"
     uv run main.py --agent react --rol lectura "Marca el T-1042 como resuelto"
+    uv run main.py --rag "¿Cuál es el tiempo de respuesta de PagosRed según su contrato?"
+    uv run main.py --rag "¿Cuándo escalo un ticket de prioridad alta?" --k 3 --embedder fake
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ from contracts import (
     run_tool_loop,
 )
 from core.config import KNOWN_PROVIDERS, Settings, get_settings
-from core.errors import AllProvidersFailedError
+from core.errors import AllProvidersFailedError, ProviderError
 from core.llm_client import LLMClient, ToolCall
 from prompting import PromptKit, PromptNotFoundError
 
@@ -52,6 +54,8 @@ PROMPT_VARIABLES = {
 TICKETS_DB_PATH = DATA_DIR / "tickets_db.json"
 # Clase 5: nombre, permiso, resultado e intentos de cada herramienta (nunca argumentos).
 TOOL_LOG_PATH = Path(__file__).parent / "logs" / "tool_calls.jsonl"
+# Clase 6: RAG sobre data/docs, indexados con scripts/ingest_docs.py.
+RAG_K = 5
 
 # Herramientas disponibles en el modo --tools.
 TOOLS = [BUSCAR_TICKET, CONSULTAR_PROVEEDOR]
@@ -129,7 +133,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="operador",
         help="Con --agent, rol para el ToolRunner: lectura u operador (Clase 5).",
     )
+    parser.add_argument(
+        "--rag",
+        metavar="PREGUNTA",
+        help="Responde con los documentos de operaciones y cita las fuentes (Clase 6).",
+    )
+    parser.add_argument(
+        "--k", type=int, help=f"Con --rag, cuántos chunks recuperar (por defecto {RAG_K})."
+    )
+    parser.add_argument(
+        "--embedder",
+        choices=("gemini", "fake"),
+        help="Con --rag, embedder del índice (por defecto gemini; fake no usa red ni cuota).",
+    )
     args = parser.parse_args(argv)
+    if args.rag is not None:
+        others = (args.prompt, args.ticket, args.agent, args.prompt_name, args.demo)
+        if any(others) or args.structured or args.tools:
+            parser.error("--rag recibe la pregunta y no se combina con otros modos.")
+        return args
+    if args.k is not None or args.embedder is not None:
+        parser.error("--k y --embedder requieren --rag.")
     if args.verify and not args.agent:
         parser.error("--verify requiere --agent.")
     if args.mcp and not args.agent:
@@ -338,8 +362,52 @@ def build_client(args: argparse.Namespace) -> LLMClient:
         return LLMClient.from_settings(settings)
 
 
+def run_rag(args: argparse.Namespace) -> int:
+    """`--rag`: busca en el índice, responde con citas e imprime las fuentes (S43)."""
+    from knowledge.embeddings import make_embedder
+    from knowledge.rag import answer
+    from knowledge.store import STORE_PATH, EmbeddingMismatch, open_store
+
+    ingest_hint = "corre primero `uv run scripts/ingest_docs.py data/docs`"
+    if not Path(STORE_PATH).exists():
+        print(
+            f"Error: no hay índice de documentos en {STORE_PATH}; {ingest_hint}.", file=sys.stderr
+        )
+        return 2
+    try:
+        store = open_store(make_embedder(args.embedder or "gemini"))
+    except EmbeddingMismatch as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+    if store.count() == 0:
+        print(f"Error: el índice de documentos está vacío; {ingest_hint}.", file=sys.stderr)
+        return 2
+
+    try:
+        client = build_client(args)
+        result = answer(client, store, args.rag, k=args.k or RAG_K)
+    except ValidationError as e:
+        return fail(config_error(e))
+    except StructuredOutputError as e:
+        return fail(f"el modelo no devolvió una respuesta válida. {e}")
+    except AllProvidersFailedError as e:
+        lines = "\n".join(f"  - {type(err).__name__}: {err}" for err in e.errors)
+        return fail(f"ningún proveedor pudo responder.\n{lines}")
+    except ProviderError as e:
+        return fail(f"no se pudo calcular el embedding de la pregunta. {e}")
+
+    print(result.respuesta.strip())
+    if result.encontrado:
+        print("\nFuentes:")
+        for fuente in result.fuentes:
+            print(f"  [{fuente['n']}] {fuente['etiqueta']}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.rag is not None:
+        return run_rag(args)
 
     try:
         text = find_ticket(args.ticket)["descripcion"] if args.ticket else args.prompt
