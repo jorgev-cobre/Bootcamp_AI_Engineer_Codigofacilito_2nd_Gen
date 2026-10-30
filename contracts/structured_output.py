@@ -109,9 +109,13 @@ def generate_structured(
     max_repairs: int = 2,
     *,
     log_extra: dict | None = None,
+    validation_context: dict | None = None,
     **params,
 ) -> T:
     """Pide al modelo un `schema` y lo devuelve validado, reparando hasta `max_repairs` veces.
+
+    `validation_context` llega a los validadores del modelo (`info.context`): sirve para
+    reglas que dependen de la request, como "cada cita debe estar entre 1 y n" en RAG.
 
     La estrategia depende del proveedor que atiende la request (el primero de la cadena):
     1. `json_schema` estricto si `supports_json_schema`.
@@ -143,7 +147,9 @@ def generate_structured(
             history, log_extra=extra, response_format=response_format, **params
         )
         try:
-            return schema.model_validate_json(_strip_fences(response.text))
+            return schema.model_validate_json(
+                _strip_fences(response.text), context=validation_context
+            )
         except ValidationError as e:
             last_error = repair_message(e)
             history.append({"role": "assistant", "content": response.text})
