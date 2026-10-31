@@ -1,0 +1,13 @@
+Preguntas frecuentes de soporte general de Acme Operaciones.
+
+¿Cómo abro un ticket? Escribe a la mesa de ayuda en mesa.ayuda@acme.example o usa el formulario de la intranet. Incluye qué pasa, desde cuándo, a quién afecta y, si lo tienes, una captura de pantalla. La mesa de ayuda te responde con el número de ticket, que empieza con T- y cuatro dígitos.
+
+¿En qué horario atiende la mesa de ayuda? De lunes a viernes de 8:00 a 20:00. Fuera de ese horario solo se atienden tickets de prioridad alta a través de la guardia N1, que cubre las 24 horas.
+
+¿Quién decide la prioridad de mi ticket? La guardia N1 la asigna al recibirlo según el impacto: alta si afecta a clientes, cobros o un área completa; media si afecta a una persona o a un proceso con alternativa; baja si no detiene a nadie. Si no estás de acuerdo con la prioridad, responde al correo del ticket y explica el impacto.
+
+¿Cómo sé en qué va mi ticket? Responde al correo del ticket o consulta la intranet con su número. Los estados posibles son abierto, en revisión, esperando proveedor y resuelto. Esperando proveedor significa que el siguiente paso depende de un proveedor externo y que la guardia le da seguimiento.
+
+¿Puedo reabrir un ticket resuelto? Sí, durante los cinco días hábiles siguientes a su cierre. Después de ese plazo abre un ticket nuevo y menciona el número del anterior.
+
+¿Qué hago si el problema afecta a varias personas? Abre un solo ticket y menciona a las personas afectadas. Varios tickets por el mismo problema retrasan la atención porque la guardia tiene que unirlos.

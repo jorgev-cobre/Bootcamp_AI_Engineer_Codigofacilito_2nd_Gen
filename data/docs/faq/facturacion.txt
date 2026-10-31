@@ -1,0 +1,13 @@
+Preguntas frecuentes de facturación y pagos a proveedores.
+
+Recibí dos facturas con el mismo folio, ¿qué hago? Abre un ticket con Finanzas y adjunta las dos facturas. Finanzas cancela la duplicada en el sistema de facturación. Si además hubo un doble cargo a la tarjeta del cliente, el reembolso lo procesa la pasarela de pagos y Finanzas da seguimiento con el proveedor.
+
+¿Cuánto tarda un reembolso con tarjeta? Depende de la pasarela de pagos y del banco del cliente. Normalmente entre 5 y 10 días hábiles desde que la pasarela confirma la reversión. Finanzas no puede adelantar el reembolso por otro medio.
+
+¿Cuándo se paga a los proveedores? Los pagos a proveedores se programan los martes y jueves. Una factura recibida y validada antes del viernes a las 14:00 entra en la programación de la semana siguiente. El plazo de pago estándar es de 30 días naturales desde la validación.
+
+¿Cómo cambia un proveedor sus datos bancarios? El proveedor envía la solicitud por el portal de proveedores con el estado de cuenta en papel membretado. Compras confirma el cambio por teléfono con el contacto registrado del proveedor antes de aplicarlo. Una solicitud que llega solo por correo no se aplica, aunque parezca legítima.
+
+¿Qué es una nota de crédito? Es el documento que anula total o parcialmente una factura ya timbrada. Finanzas la emite cuando se cancela un cobro, se devuelve un producto o se corrige un precio.
+
+¿Dónde consulto si ya me pagaron? Los proveedores consultan sus pagos en el portal de proveedores. Si el portal no está disponible, pueden escribir a cuentas.por.pagar@acme.example con el número de factura.

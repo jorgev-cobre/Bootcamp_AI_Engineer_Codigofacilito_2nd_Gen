@@ -1,0 +1,13 @@
+Preguntas frecuentes sobre accesos, contraseñas y VPN.
+
+¿Cómo restablezco mi contraseña? Entra a la intranet, elige "Olvidé mi contraseña" y sigue las instrucciones del correo. El enlace vence en 30 minutos. Si no te llega el correo, abre un ticket con la mesa de ayuda desde el correo de tu jefe inmediato.
+
+¿Cada cuánto debo cambiar mi contraseña? Cada 90 días. El sistema te avisa siete días antes. La contraseña nueva no puede ser igual a ninguna de las últimas cinco.
+
+¿Cómo pido acceso a una carpeta o a un módulo del ERP? Tu jefe inmediato abre un ticket con el nombre de la carpeta o del módulo y el tipo de acceso: lectura o escritura. Los accesos de escritura a módulos de Finanzas los autoriza además el líder de Finanzas. Un acceso temporal, por ejemplo para una auditoría externa, debe indicar la fecha de vencimiento.
+
+¿Cómo doy de alta a una persona nueva? Recursos Humanos abre el ticket de alta con al menos tres días hábiles de anticipación. TI crea el usuario, el correo y los accesos de solo lectura del área; los accesos adicionales se piden aparte.
+
+La VPN se desconecta, ¿qué hago? Primero verifica tu conexión a internet sin la VPN. Si la VPN se desconecta cada pocos minutos, actualiza el cliente de VPN a la última versión desde la intranet y reinicia el equipo. Si sigue fallando, abre un ticket con la hora de las desconexiones; si afecta a varias personas del mismo equipo, menciónalas en el mismo ticket.
+
+¿Puedo compartir mi usuario? No. Cada persona usa su propio usuario. Compartir usuarios impide saber quién hizo cada cambio y es motivo de baja del acceso.

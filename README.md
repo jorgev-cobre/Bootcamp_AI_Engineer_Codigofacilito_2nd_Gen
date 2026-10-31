@@ -9,6 +9,7 @@ El Agente Operador es un asistente para el equipo de operaciones de una empresa 
 - **Clase 3:** salida estructurada con contratos Pydantic y reparación (`contracts/`), y el primer tool call (`tools/`).
 - **Clase 4:** agentes escritos a mano (`agents/`): ReAct y plan-and-execute, con presupuesto, motivos de parada y traza.
 - **Clase 5:** herramientas con política (`agents/tools.py`): permisos por rol, topes, timeout, reintentos y errores tipados; una herramienta de escritura idempotente y un server MCP (`operador_mcp/`).
+- **Clase 6:** RAG escrito a mano (`knowledge/`): ingesta, chunking, embeddings con Gemini, índice en ChromaDB y respuestas con citas.
 
 ## Qué se construye en cada bloque
 
@@ -75,6 +76,10 @@ uv run main.py --agent plan "Compara el estado del T-1042 y el T-1014: ¿cuál v
 # Herramientas con política y MCP (Clase 5)
 uv run main.py --agent react --mcp "¿Cómo va el T-1042?"
 uv run main.py --agent react --rol lectura "Marca el T-1042 como resuelto"
+
+# RAG sobre los documentos de operaciones (Clase 6; antes corre scripts/ingest_docs.py)
+uv run main.py --rag "¿Cuál es el tiempo de respuesta de PagosRed según su contrato?"
+uv run main.py --rag "¿Cuándo escalo un ticket de prioridad alta?" --k 3 --embedder fake
 ```
 
 Cada llamada imprime la respuesta y una línea gris con `proveedor · modelo · tokens in/out · latencia · costo`, y agrega una línea JSON por intento a `logs/llm_calls.jsonl`. Con `--prompt`, el log incluye `prompt_name` y `prompt_version`.
@@ -100,6 +105,10 @@ uv run scripts/compare_structured.py --limit 8 --modes texto pydantic
 
 # Tool loop vs ReAct vs plan-and-execute (Clase 4)
 uv run scripts/compare_agents.py --repeat 3
+
+# RAG (Clase 6): indexar data/docs y medir hit@k del retrieval
+uv run scripts/ingest_docs.py data/docs
+uv run scripts/eval_retrieval.py --k 1 3 5
 ```
 
 `compare_prompts.py` usa un solo proveedor sin fallback (el primario o el de `--provider`). `main.py --prompt` usa solo el primario si la cadena de fallbacks no se puede armar (por ejemplo, mientras `GroqProvider` esté pendiente).
@@ -122,6 +131,8 @@ uv run ruff format --check .
 | `prompts/ticket_classifier/examples.jsonl` | 10 ejemplos para few-shot (no se repiten con los de evaluación) |
 | `data/tickets_db.json` | 50 tickets (`T-1001` a `T-1050`) con estado, equipo, proveedor e historial; los lee `buscar_ticket` |
 | `data/proveedores.json` | 6 proveedores ficticios con servicio, SLA, estado y contacto (práctica de la Clase 3) |
+| `data/docs/` | 12 documentos ficticios de Acme Operaciones: 3 runbooks, 3 políticas, 3 contratos en PDF y 3 FAQ (Clase 6) |
+| `data/golden/rag_v1.jsonl` | 10 preguntas con su fuente esperada y 1 fuera del corpus, para `eval_retrieval.py` |
 
 ## Arquitectura
 
@@ -164,6 +175,11 @@ flowchart LR
 | `operador_mcp/server.py` | Server MCP (`MCPServer`) con las herramientas, delegando en un `ToolRunner` |
 | `operador_mcp/client.py` | `MCPToolset`: lanza el server por stdio y expone sus tools como `ToolSpec` |
 | `var/` | Estado local de las herramientas (`var/*.json`, fuera de git) |
+| `knowledge/ingest.py` | `Document`, loaders de Markdown, TXT y PDF, y `clean_text` |
+| `knowledge/chunking.py` | `Chunk` y las estrategias fija, recursiva y por encabezados |
+| `knowledge/embeddings.py` | `GeminiEmbedder` (con caché SQLite), `FakeEmbedder` y los prefijos de tarea |
+| `knowledge/store.py` | `VectorStore` sobre ChromaDB: indexar, borrar, buscar; `EmbeddingMismatch` |
+| `knowledge/rag.py` | `answer`: busca, filtra por umbral, responde con citas validadas |
 
 ## Clase 2: prompt engineering y context engineering
 
@@ -341,6 +357,49 @@ El server lleva la cuenta de `max_llamadas` mientras vive: en una sesión larga 
 | Transporte en memoria | `Client(server)` despacha directo, sin JSON-RPC ([testing](https://py.sdk.modelcontextprotocol.io/get-started/testing/)) | `tests/test_mcp.py` usa ambos: memoria y stdio real |
 | Especificación | Versión 2026-07-28: las annotations son pistas no confiables salvo de servers confiables | — |
 
+## Clase 6: RAG, el agente aprende a leer documentos
+
+**RAG** (*Retrieval-Augmented Generation*) es responder con documentos propios en lugar de con lo que el modelo memorizó. Tiene dos carriles. El de **ingesta** corre antes, una vez por cambio: lee cada archivo de `data/docs/`, lo limpia, lo parte en chunks, calcula un embedding por chunk y lo guarda en el índice. El de **consulta** corre en cada pregunta: calcula el embedding de la pregunta, recupera los `k` chunks más cercanos, descarta los que están más lejos que `UMBRAL` y le pide al modelo que responda solo con ellos, citando cada dato con `[n]`. Si nada pasa el umbral, no se llama al LLM: la respuesta es `No encontré eso en los documentos de operaciones.`
+
+| Pieza | Archivo | Idea clave |
+|---|---|---|
+| Ingesta | `knowledge/ingest.py` | Un `Document` por archivo o por página de PDF; `clean_text` une guiones, quita encabezados y pies repetidos y colapsa espacios; `hash` del texto limpio |
+| Chunking | `knowledge/chunking.py` | Runbooks y políticas por encabezados (`seccion` = "Escalamiento > Prioridad alta"); contratos recursivo; FAQ fijo con 15% de traslape |
+| Embeddings | `knowledge/embeddings.py` | `gemini-embedding-2` sin `task_type`: prefijos `title: … \| text: …` y `task: search result \| query: …`; caché por modelo, dimensión y texto |
+| Índice | `knowledge/store.py` | ChromaDB con distancia coseno; la colección guarda modelo y dimensión y se niega a abrirse con otro embedder |
+| Respuesta | `knowledge/rag.py` | `RagAnswer` validado con `generate_structured`; una cita fuera de rango se repara una vez |
+
+La ingesta es idempotente: un archivo con el mismo `hash` se salta y uno que cambió se borra y se reindexa completo, así que no quedan chunks huérfanos.
+
+### Comandos
+
+```bash
+# Indexar (gemini por defecto; --rebuild borra el índice y reindexa todo)
+uv run scripts/ingest_docs.py data/docs
+uv run scripts/ingest_docs.py data/docs --rebuild
+
+# Preguntar
+uv run main.py --rag "¿Cuál es el tiempo de respuesta de PagosRed según su contrato?"
+uv run main.py --rag "¿Qué pasa si PagosRed no cumple el tiempo de respuesta?" --k 3
+
+# Medir el retrieval sin LLM: hit@k y la distancia de la pregunta fuera del corpus
+uv run scripts/eval_retrieval.py --k 1 3 5
+
+# Sin cuota ni red: embedder falso (bolsa de palabras); reemplaza el índice de .chroma/
+uv run scripts/ingest_docs.py data/docs --embedder fake --rebuild
+uv run main.py --rag "¿Cómo reinicio la cola de pedidos?" --embedder fake
+uv run scripts/eval_retrieval.py --embedder fake
+```
+
+El índice se abre con el mismo embedder con el que se creó: si cambias de `gemini` a `fake` (o al revés), reconstrúyelo con `--rebuild`. Las distancias del embedder falso no se parecen a las de Gemini, así que con `UMBRAL = 0.6` muchas preguntas salen como "no encontrado": sirve para probar el pipeline, no para calibrar.
+
+### Configuración
+
+- **Llave de Gemini:** la misma de la Clase 1, `GEMINI_API_KEY` en `.env`. Los embeddings no pasan por `PRIMARY`/`FALLBACKS`: siempre usan Gemini. La respuesta sí usa el `LLMClient` de siempre.
+- **Índice:** `.chroma/` (fuera de git). Caché de embeddings: `.cache/embeddings.sqlite` (fuera de git): reindexar un documento que no cambió no vuelve a pagar embeddings.
+- **Log:** cada llamada de embeddings agrega a `logs/llm_calls.jsonl` `embed_model`, `embed_batch` y `latency_ms`; cada respuesta RAG agrega `rag_k`, `rag_hits`, `rag_chunk_ids` y `rag_encontrado` (nunca el texto de los chunks).
+- **PDF del corpus:** se generan con `uv run scripts/make_corpus_pdfs.py` (solo hace falta si cambias su texto) y traen encabezados, pies y palabras partidas a propósito.
+
 ## Retos
 
 ### Reto de la Clase 1: proveedor de respaldo y reporte
@@ -423,10 +482,29 @@ Opcional: migra el system prompt de `main.py` (busca `TODO(clase-2)`) a `prompts
 3. Dale `ToolPolicy("escritura", idempotente=True)` y expónla en el server MCP con sus annotations.
 4. Escribe el test: dos llamadas iguales con el mismo `request_id` crean un solo ticket.
 
+### Práctica guiada de la Clase 6: filtrar por metadatos
+
+1. En `tests/test_store.py`, escribe un test con `FakeEmbedder` que indexe una política y un contrato con texto parecido, busque con `where=build_where(tipo="politica")` y espere solo la política. Debe fallar.
+2. Implementa `build_where` en `knowledge/store.py` (busca `TODO(clase-6)`): sin filtros regresa `None`; con un filtro, un dict simple (`{"tipo_doc": "politica"}`); con dos, `{"$and": [{...}, {...}]}`.
+3. Conecta `--tipo` y `--proveedor` en `main.py --rag` y pásalos a `answer(..., where=build_where(...))`.
+4. Compara la misma pregunta con y sin filtro:
+   ```bash
+   uv run main.py --rag "¿Qué pasa si PagosRed no cumple el tiempo de respuesta?"
+   uv run main.py --rag "¿Qué pasa si PagosRed no cumple el tiempo de respuesta?" --tipo contrato --proveedor PagosRed
+   ```
+
+### Reto para la Clase 7: elegir tamaño de chunk y umbral con datos
+
+1. Amplía el golden set a 15 preguntas en `data/golden/rag_v2.jsonl`: agrega 5 propias, 2 de ellas con el dato al final de una sección larga y 1 fuera del corpus.
+2. Escribe `scripts/compare_chunking.py`: reindexa con chunks de 200, 400 y 800 tokens (15% de traslape) en colecciones separadas, reusando la caché de embeddings.
+3. Reporta hit@1, hit@3 y hit@5 de cada tamaño, y la distancia del primer hit en las preguntas fuera del corpus.
+4. Elige el tamaño por defecto y el `UMBRAL`, y justifícalos con esos números en `reports/chunking.md`.
+
 ## Avisos
 
 - Gemini se consume con su [endpoint oficial compatible con OpenAI](https://ai.google.dev/gemini-api/docs/openai), que Google marca como **beta**. Desde junio de 2026 Google recomienda su API nativa, la [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview), para proyectos nuevos. Aquí usamos la compatible con OpenAI para que Gemini, Groq y Ollama compartan un mismo adaptador base. Cambiar a la API nativa solo requiere otro adaptador en `core/providers.py`; el resto del código no se toca.
 - En el free tier de Gemini, `compare_prompts.py` puede recibir errores 429 (límite por minuto). El script reintenta con esperas de hasta ~1 minuto; si un ticket aun así falla, se reporta como error del proveedor y no como fuera de formato.
 - El validador `caida_es_alta` de `TicketClassification` es una **simplificación didáctica**: busca la palabra "caíd" en el texto. Una regla real usaría un campo explícito.
+- Los embeddings se registran en el log con `cost_usd: 0`: `core/pricing.py` solo tiene precios de generación de texto.
 - Los precios en `core/pricing.py` son **ilustrativos**. Revisa la tabla vigente de cada proveedor antes de tomar decisiones con ellos.
 - **Nunca subas tu `.env`** al repositorio. Ya está en `.gitignore`; si alguna vez lo subes por error, rota tus llaves.
