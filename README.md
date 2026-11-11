@@ -10,6 +10,7 @@ El Agente Operador es un asistente para el equipo de operaciones de una empresa 
 - **Clase 4:** agentes escritos a mano (`agents/`): ReAct y plan-and-execute, con presupuesto, motivos de parada y traza.
 - **Clase 5:** herramientas con política (`agents/tools.py`): permisos por rol, topes, timeout, reintentos y errores tipados; una herramienta de escritura idempotente y un server MCP (`operador_mcp/`).
 - **Clase 6:** RAG escrito a mano (`knowledge/`): ingesta, chunking, embeddings con Gemini, índice en ChromaDB y respuestas con citas.
+- **Clase 7:** RAG agéntico: búsqueda híbrida (BM25 + vectores, fusionados con RRF), reescritura de la pregunta, re-ranking con el LLM y `buscar_documentos` como herramienta del agente.
 
 ## Qué se construye en cada bloque
 
@@ -81,6 +82,11 @@ uv run main.py --agent react --rol lectura "Marca el T-1042 como resuelto"
 uv run main.py --rag "¿Cuál es el tiempo de respuesta de PagosRed según su contrato?"
 uv run main.py --rag "¿Cuándo escalo un ticket de prioridad alta?" --k 3 --embedder fake
 uv run main.py --rag "¿Qué pasa si PagosRed no cumple el tiempo de respuesta?" --tipo contrato --proveedor PagosRed
+
+# RAG agéntico (Clase 7): búsqueda híbrida, reescritura, re-ranking y el agente con documentos
+uv run main.py --rag "¿Qué pasó con el T-1016?" --modo hibrida
+uv run main.py --rag "¿Cuánto tardan los de pagos en contestar?" --modo hibrida --reescribir --rerank
+uv run main.py --agent react --docs "El T-1042 lleva 6 horas sin respuesta de PagosRed. ¿Ya hay que escalar?"
 ```
 
 Cada llamada imprime la respuesta y una línea gris con `proveedor · modelo · tokens in/out · latencia · costo`, y agrega una línea JSON por intento a `logs/llm_calls.jsonl`. Con `--prompt`, el log incluye `prompt_name` y `prompt_version`.
@@ -113,6 +119,10 @@ uv run scripts/eval_retrieval.py --k 1 3 5
 
 # Tamaño de chunk y umbral con el golden set v2 (reto de la Clase 6)
 uv run scripts/compare_chunking.py --report reports/chunking.md
+
+# Modos de búsqueda sobre el golden set v3 (Clase 7); los modos con + llaman al LLM
+uv run scripts/eval_retrieval.py --modos vector bm25 hibrida --detalle
+uv run scripts/eval_retrieval.py --modos hibrida hibrida+rerank
 ```
 
 `compare_prompts.py` usa un solo proveedor sin fallback (el primario o el de `--provider`). `main.py --prompt` usa solo el primario si la cadena de fallbacks no se puede armar (por ejemplo, mientras `GroqProvider` esté pendiente).
@@ -404,6 +414,37 @@ El índice se abre con el mismo embedder con el que se creó: si cambias de `gem
 - **Log:** cada llamada de embeddings agrega a `logs/llm_calls.jsonl` `embed_model`, `embed_batch` y `latency_ms`; cada respuesta RAG agrega `rag_k`, `rag_hits`, `rag_chunk_ids` y `rag_encontrado` (nunca el texto de los chunks).
 - **PDF del corpus:** se generan con `uv run scripts/make_corpus_pdfs.py` (solo hace falta si cambias su texto) y traen encabezados, pies y palabras partidas a propósito.
 
+## Clase 7: RAG agéntico
+
+La búsqueda vectorial compara significado, y eso falla con lo que casi no lo tiene: un ID de ticket, un correo, un número de cláusula. Esta clase agrega al retrieval una búsqueda por palabras exactas, la fusión de ambas, la reescritura de la pregunta y un re-ranking, y convierte la búsqueda en una herramienta que el agente decide cuándo usar.
+
+| Pieza | Archivo | Idea clave |
+|---|---|---|
+| BM25 | `knowledge/lexical.py` | Búsqueda por palabras: premia los términos raros del corpus (IDF) y normaliza por largo. `T-1042` es un solo token. El índice se arma en memoria con los chunks de Chroma |
+| Fusión | `knowledge/retrieval.py` | Top-20 vectorial y top-20 BM25 fusionados con RRF, `1 / (60 + posición)`: solo usa posiciones, así que no importa que distancia y puntaje estén en escalas distintas |
+| Reescritura | `knowledge/rewrite.py` | El LLM convierte la pregunta en hasta 3 consultas con el vocabulario de los documentos; cada una aporta su ranking a la fusión |
+| Re-ranking | `knowledge/rerank.py` | El LLM califica de 0 a 3 cada candidato y quedan los de 2 o más. Si ninguno queda, no se llama al LLM de respuesta |
+| Herramienta | `tools/documentos.py` | `buscar_documentos(consulta)`: el agente decide cuándo buscar, con qué palabras y si vuelve a buscar |
+
+`Retriever.search` tiene la misma firma que `VectorStore.search`, así que `answer()` de la Clase 6 lo usa sin cambiar su lógica. Lo que cambia es el umbral: en modo `vector` sigue filtrando por distancia; en `bm25` e `hibrida` no, porque la distancia no ve las palabras exactas, y deciden el reranker o el modelo con `encontrado = false`.
+
+### Comandos
+
+```bash
+# Comparar modos sobre data/golden/rag_v3.jsonl (el v2 más 6 preguntas con IDs y números)
+uv run scripts/eval_retrieval.py --modos vector bm25 hibrida --detalle
+uv run scripts/eval_retrieval.py --modos hibrida hibrida+reescritura hibrida+rerank
+
+# Preguntar con búsqueda híbrida, reescritura y re-ranking
+uv run main.py --rag "¿Qué pasó con el T-1016?" --modo hibrida
+uv run main.py --rag "¿Cuánto tardan los de pagos en contestar?" --modo hibrida --reescribir --rerank
+
+# El agente con buscar_documentos (búsqueda híbrida, sin rerank)
+uv run main.py --agent react --docs --verbose "El T-1042 lleva 6 horas sin respuesta de PagosRed. ¿Ya hay que escalar?"
+```
+
+Costo por pregunta: `hibrida` cuesta lo mismo que `vector` (un embedding de la pregunta y una respuesta del LLM). `--reescribir` y `--rerank` agregan una llamada al LLM cada uno. En `eval_retrieval.py`, cada modo con `+` hace una llamada por paso y por pregunta.
+
 ## Retos
 
 ### Reto de la Clase 1: proveedor de respaldo y reporte
@@ -504,11 +545,29 @@ Opcional: migra el system prompt de `main.py` (busca `TODO(clase-2)`) a `prompts
 3. Reporta hit@1, hit@3 y hit@5 de cada tamaño, y la distancia del primer hit en las preguntas fuera del corpus.
 4. Elige el tamaño por defecto y el `UMBRAL`, y justifícalos con esos números en `reports/chunking.md`.
 
+### Práctica guiada de la Clase 7: el agente elige los filtros
+
+1. En `tests/test_buscar_documentos.py`, escribe un test: con el `ToolRunner`, `buscar_documentos` con `{"consulta": "tiempo de respuesta", "tipo": "contrato", "proveedor": "PagosRed"}` regresa solo refs de `contratos/pagosred.pdf`. Debe fallar.
+2. En `BuscarDocumentosArgs` (`contracts/tool_schemas.py`, busca `TODO(clase-7)`), agrega `tipo` y `proveedor`, los dos opcionales. `tipo` es un `Literal` con los cuatro tipos de documento; las descripciones le dicen al modelo cuándo usarlos.
+3. En `tools/documentos.py` (busca `TODO(clase-7)`), pasa `where=build_where(args.tipo, args.proveedor)` a `retriever.search`.
+4. Corre el agente con `--verbose` y revisa en la traza qué filtros eligió:
+   ```bash
+   uv run main.py --agent react --docs --verbose "Según su contrato, ¿qué penalización tiene PagosRed si no responde a tiempo?"
+   ```
+
+### Reto para la Clase 8: preguntas que una sola búsqueda no resuelve
+
+1. Escribe `data/golden/multihop_v1.jsonl` con 6 preguntas que necesitan juntar datos de 2 o más documentos, con sus `fuentes_esperadas` (una lista). Ejemplo: "El T-1043 lleva 3 horas sin respuesta del proveedor, ¿ya incumplió su contrato?" necesita `runbooks/portal-proveedores.md` (el T-1043 es del portal, que hospeda NubeHost) y `contratos/nubehost.pdf` (2 horas hábiles).
+2. Escribe `scripts/eval_multihop.py`: para cada modo (`vector`, `hibrida`, `hibrida+rerank`), qué fracción de las `fuentes_esperadas` llega al top-5 (recall@5) y en cuántas preguntas llegan todas.
+3. Corre el agente con `--docs` sobre las 6 preguntas y anota cuántas búsquedas hizo en cada una y si la respuesta es correcta.
+4. Escribe en `reports/multihop.md` qué preguntas fallan con una búsqueda, cuáles resuelve el agente buscando varias veces y por qué. En la Clase 8 comparamos estos números contra un grafo.
+
 ## Avisos
 
 - Gemini se consume con su [endpoint oficial compatible con OpenAI](https://ai.google.dev/gemini-api/docs/openai), que Google marca como **beta**. Desde junio de 2026 Google recomienda su API nativa, la [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview), para proyectos nuevos. Aquí usamos la compatible con OpenAI para que Gemini, Groq y Ollama compartan un mismo adaptador base. Cambiar a la API nativa solo requiere otro adaptador en `core/providers.py`; el resto del código no se toca.
 - En el free tier de Gemini, `compare_prompts.py` puede recibir errores 429 (límite por minuto). El script reintenta con esperas de hasta ~1 minuto; si un ticket aun así falla, se reporta como error del proveedor y no como fuera de formato.
 - El validador `caida_es_alta` de `TicketClassification` es una **simplificación didáctica**: busca la palabra "caíd" en el texto. Una regla real usaría un campo explícito.
 - Los embeddings se registran en el log con `cost_usd: 0`: `core/pricing.py` solo tiene precios de generación de texto.
+- `BM25Index` vive en memoria y se arma con todos los chunks del índice cada vez que se crea un `Retriever`. Con los 54 chunks del corpus tarda milisegundos; con cientos de miles de chunks, ese papel lo hace un motor de búsqueda (OpenSearch, Elasticsearch o la búsqueda de texto completo de Postgres).
 - Los precios en `core/pricing.py` son **ilustrativos**. Revisa la tabla vigente de cada proveedor antes de tomar decisiones con ellos.
 - **Nunca subas tu `.env`** al repositorio. Ya está en `.gitignore`; si alguna vez lo subes por error, rota tus llaves.
