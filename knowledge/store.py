@@ -27,6 +27,7 @@ class Hit:
     texto: str
     metadatos: dict
     distancia: float
+    relevancia: int | None = None  # 0-3, solo si pasó por el reranker (Clase 7)
 
 
 class EmbeddingMismatch(Exception):

@@ -13,6 +13,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Literal
 
 from knowledge.lexical import BM25Index
+from knowledge.rerank import rerank
 from knowledge.rewrite import rewrite_query
 
 if TYPE_CHECKING:
@@ -46,15 +47,17 @@ class Retriever:
         modo: Modo = "hibrida",
         client: LLMClient | None = None,
         reescribir: bool = False,
+        rerank: bool = False,
         bm25: BM25Index | None = None,
         candidatos: int = CANDIDATOS,
     ) -> None:
-        if reescribir and client is None:
-            raise ValueError("reescribir necesita un LLMClient")
+        if (reescribir or rerank) and client is None:
+            raise ValueError("reescribir y rerank necesitan un LLMClient")
         self.store = store
         self.modo = modo
         self.client = client
         self.con_reescritura = reescribir
+        self.con_rerank = rerank
         self.candidatos = candidatos
         self.bm25 = bm25 or (BM25Index.from_store(store) if modo != "vector" else None)
         self.consultas: list[str] = []  # Las de la última búsqueda, para mostrarlas.
@@ -75,4 +78,6 @@ class Retriever:
 
         ids = [chunk_id for chunk_id, _ in rrf(rankings)][: self.candidatos]
         hits = self.store.get_hits(ids, pregunta)
+        if self.con_rerank:
+            return rerank(self.client, pregunta, hits, k=k)
         return hits[:k]

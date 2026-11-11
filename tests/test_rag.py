@@ -138,3 +138,16 @@ def test_log_has_rag_fields(logger, log_path, fake_sleep):
     assert event["rag_encontrado"] is True
     assert event["prompt_name"] == "rag_answer"
     assert "Prioridad alta" not in json.dumps(event)  # nunca el texto de los chunks
+
+
+def test_without_threshold_far_hits_still_reach_the_llm(logger, fake_sleep):
+    provider, client = client_for(
+        [reply(encontrado=False, respuesta="No está en los documentos.", citas=[])],
+        logger,
+        fake_sleep,
+    )
+
+    result = answer(client, StubStore([HITS[2]]), "¿Cuántos días de vacaciones tengo?", umbral=None)
+
+    assert result.encontrado is False
+    assert len(provider.calls) == 1  # Sin umbral, decide el modelo.
