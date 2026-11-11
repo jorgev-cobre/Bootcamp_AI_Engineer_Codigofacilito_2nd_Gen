@@ -50,6 +50,8 @@ POLITICAS: dict[str, ToolPolicy] = {
     "listar_tickets_por_proveedor": ToolPolicy("lectura", timeout_s=2),
     # Escritura idempotente gracias a la idempotency_key: el reintento no duplica.
     "crear_ticket": ToolPolicy("escritura", idempotente=True),
+    # Clase 7: embedding de la consulta y, con rerank, una llamada al LLM.
+    "buscar_documentos": ToolPolicy("lectura", timeout_s=30),
 }
 ROLES: dict[Rol, set[Permiso]] = {"lectura": {"lectura"}, "operador": {"lectura", "escritura"}}
 

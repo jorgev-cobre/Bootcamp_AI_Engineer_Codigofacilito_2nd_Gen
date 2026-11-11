@@ -18,6 +18,7 @@ Uso:
     uv run main.py --rag "¿Qué pasa si PagosRed no cumple?" --tipo contrato --proveedor PagosRed
     uv run main.py --rag "¿Qué pasó con el T-1016?" --modo hibrida
     uv run main.py --rag "¿Cuánto tardan los de pagos en contestar?" --modo hibrida --rerank
+    uv run main.py --agent react --docs "El T-1042 lleva 6 horas sin respuesta: ¿escalo?"
 """
 
 from __future__ import annotations
@@ -180,18 +181,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Con --rag, el LLM califica los candidatos y deja solo los relevantes (Clase 7).",
     )
+    parser.add_argument(
+        "--docs",
+        action="store_true",
+        help="Con --agent, agrega buscar_documentos: búsqueda híbrida en data/docs (Clase 7).",
+    )
     args = parser.parse_args(argv)
     if args.rag is not None:
         others = (args.prompt, args.ticket, args.agent, args.prompt_name, args.demo)
-        if any(others) or args.structured or args.tools:
+        if any(others) or args.structured or args.tools or args.docs:
             parser.error("--rag recibe la pregunta y no se combina con otros modos.")
         return args
-    if args.k is not None or args.embedder is not None:
-        parser.error("--k y --embedder requieren --rag.")
+    if args.k is not None or (args.embedder is not None and not args.docs):
+        parser.error("--k requiere --rag; --embedder requiere --rag o --docs.")
     if args.tipo is not None or args.proveedor is not None:
         parser.error("--tipo y --proveedor requieren --rag.")
     if args.modo != "vector" or args.reescribir or args.rerank:
         parser.error("--modo, --reescribir y --rerank requieren --rag.")
+    if args.docs and (not args.agent or args.mcp):
+        parser.error("--docs requiere --agent y no se combina con --mcp.")
     if args.verify and not args.agent:
         parser.error("--verify requiere --agent.")
     if args.mcp and not args.agent:
@@ -292,6 +300,8 @@ def run_agent(
     *,
     mcp: bool = False,
     rol: str = "operador",
+    docs: bool = False,
+    embedder: str | None = None,
 ) -> int:
     from agents import PlanAndExecute, ReActAgent, verify_and_revise
     from agents.tools import ToolRunner
@@ -331,8 +341,20 @@ def run_agent(
         # El agente puede proponer actualizar_estado; el ToolRunner decide según el rol.
         extras = [ACTUALIZAR_ESTADO, LISTAR_TICKETS_POR_PROVEEDOR, CREAR_TICKET]
         tools = [*TOOLS, *(tool for tool in extras if tool not in TOOLS)]
+        if docs:
+            # Clase 7: la búsqueda en documentos es una herramienta más del agente.
+            from knowledge.retrieval import Retriever
+            from knowledge.store import EmbeddingMismatch
+            from tools.documentos import buscar_documentos_tool
+
+            try:
+                store = open_docs_store(embedder)
+            except (LookupError, EmbeddingMismatch) as e:
+                return fail(str(e))
+            tools.append(buscar_documentos_tool(Retriever(store, modo="hibrida")))
         runner = ToolRunner(tools, rol=rol, log_path=TOOL_LOG_PATH)
-        print(f"{GRAY}herramientas: locales · rol {rol}{RESET}")
+        con_docs = " + documentos" if docs else ""
+        print(f"{GRAY}herramientas: locales{con_docs} · rol {rol}{RESET}")
         result = agent_cls(client, tools, on_event=on_event, runner=runner).run(question)
     respuesta, checked = result.respuesta, None
     llamadas, tokens, cost_usd = result.llamadas, result.tokens, result.cost_usd
@@ -512,7 +534,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.agent:
         return run_agent(
-            client, args.agent, text, args.verbose, args.verify, mcp=args.mcp, rol=args.rol
+            client,
+            args.agent,
+            text,
+            args.verbose,
+            args.verify,
+            mcp=args.mcp,
+            rol=args.rol,
+            docs=args.docs,
+            embedder=args.embedder,
         )
 
     if args.structured or args.tools:
