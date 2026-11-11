@@ -12,6 +12,7 @@ Uso:
     uv run main.py --agent plan "Compara el T-1042 y el T-1014"
     uv run main.py --agent react --mcp "¿Cómo va el T-1042?"
     uv run main.py --agent react --rol lectura "Marca el T-1042 como resuelto"
+    uv run main.py --agent react "Crea un ticket: el portal de pagos rechaza tarjetas"
     uv run main.py --rag "¿Cuál es el tiempo de respuesta de PagosRed según su contrato?"
     uv run main.py --rag "¿Cuándo escalo un ticket de prioridad alta?" --k 3 --embedder fake
 """
@@ -257,7 +258,11 @@ def run_agent(
 ) -> int:
     from agents import PlanAndExecute, ReActAgent, verify_and_revise
     from agents.tools import ToolRunner
-    from contracts.tool_schemas import ACTUALIZAR_ESTADO, LISTAR_TICKETS_POR_PROVEEDOR
+    from contracts.tool_schemas import (
+        ACTUALIZAR_ESTADO,
+        CREAR_TICKET,
+        LISTAR_TICKETS_POR_PROVEEDOR,
+    )
 
     actions: list[str] = []
 
@@ -287,7 +292,7 @@ def run_agent(
             result = agent_cls(client, toolset.tools(), on_event=on_event).run(question)
     else:
         # El agente puede proponer actualizar_estado; el ToolRunner decide según el rol.
-        extras = [ACTUALIZAR_ESTADO, LISTAR_TICKETS_POR_PROVEEDOR]
+        extras = [ACTUALIZAR_ESTADO, LISTAR_TICKETS_POR_PROVEEDOR, CREAR_TICKET]
         tools = [*TOOLS, *(tool for tool in extras if tool not in TOOLS)]
         runner = ToolRunner(tools, rol=rol, log_path=TOOL_LOG_PATH)
         print(f"{GRAY}herramientas: locales · rol {rol}{RESET}")
