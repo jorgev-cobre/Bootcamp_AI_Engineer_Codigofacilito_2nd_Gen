@@ -6,8 +6,9 @@ respuesta. Del prompt solo se guarda su tamaño en caracteres (`prompt_chars`).
 Campos opcionales (Clase 2): `prompt_name`, `prompt_version`, `context_tokens` y
 `context_truncated`. Clase 3: `structured_schema`, `repair_attempt`, `tool_iteration` y
 `tool_calls` (solo nombres de herramientas, nunca sus argumentos). Clase 4: `agent_kind`,
-`agent_run_id`, `agent_step` y `stop_reason`. Solo se escriben cuando vienen; si no, la
-línea no los incluye.
+`agent_run_id`, `agent_step` y `stop_reason`. Clase 6: `embed_model`, `embed_batch`,
+`embed_tokens`, `rag_k`, `rag_hits`, `rag_chunk_ids` (solo IDs, nunca el texto de los
+chunks) y `rag_encontrado`. Solo se escriben cuando vienen; si no, la línea no los incluye.
 """
 
 from __future__ import annotations
@@ -49,6 +50,13 @@ class CallLogger:
         agent_run_id: str | None = None,
         agent_step: int | None = None,
         stop_reason: str | None = None,
+        embed_model: str | None = None,
+        embed_batch: int | None = None,
+        embed_tokens: int | None = None,
+        rag_k: int | None = None,
+        rag_hits: int | None = None,
+        rag_chunk_ids: list[str] | None = None,
+        rag_encontrado: bool | None = None,
     ) -> dict:
         """Agrega un evento al archivo y lo devuelve.
 
@@ -83,6 +91,13 @@ class CallLogger:
             "agent_run_id": agent_run_id,
             "agent_step": agent_step,
             "stop_reason": stop_reason,
+            "embed_model": embed_model,
+            "embed_batch": embed_batch,
+            "embed_tokens": embed_tokens,
+            "rag_k": rag_k,
+            "rag_hits": rag_hits,
+            "rag_chunk_ids": rag_chunk_ids,
+            "rag_encontrado": rag_encontrado,
         }
         event.update({key: value for key, value in optional.items() if value is not None})
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,20 +105,29 @@ class CallLogger:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
         return event
 
-    def annotate(self, request_id: str, *, stop_reason: str) -> None:
-        """Agrega `stop_reason` al evento `request_id` ya escrito.
+    def annotate(
+        self,
+        request_id: str,
+        *,
+        stop_reason: str | None = None,
+        rag_encontrado: bool | None = None,
+    ) -> None:
+        """Agrega `stop_reason` o `rag_encontrado` al evento `request_id` ya escrito.
 
         Un agente conoce su motivo de parada después de su última llamada (o sin hacer
-        otra, si lo detiene el presupuesto), así que lo anota al terminar. Solo acepta
-        `stop_reason`: no es una puerta para escribir otros datos.
+        otra, si lo detiene el presupuesto), y RAG sabe si encontró la respuesta solo al
+        validar la salida del modelo; por eso se anotan al terminar. Solo acepta esos dos
+        campos: no es una puerta para escribir otros datos.
         """
+        fields = {"stop_reason": stop_reason, "rag_encontrado": rag_encontrado}
+        fields = {key: value for key, value in fields.items() if value is not None}
         if not self.path.exists():
             return
         lines = self.path.read_text(encoding="utf-8").splitlines()
         for index in range(len(lines) - 1, -1, -1):
             event = json.loads(lines[index])
             if event.get("request_id") == request_id:
-                event["stop_reason"] = stop_reason
+                event.update(fields)
                 lines[index] = json.dumps(event, ensure_ascii=False)
                 tmp = self.path.with_suffix(".tmp")
                 tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")

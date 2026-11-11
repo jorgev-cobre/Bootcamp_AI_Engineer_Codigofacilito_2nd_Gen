@@ -12,6 +12,13 @@ Uso:
     uv run main.py --agent plan "Compara el T-1042 y el T-1014"
     uv run main.py --agent react --mcp "¿Cómo va el T-1042?"
     uv run main.py --agent react --rol lectura "Marca el T-1042 como resuelto"
+    uv run main.py --agent react "Crea un ticket: el portal de pagos rechaza tarjetas"
+    uv run main.py --rag "¿Cuál es el tiempo de respuesta de PagosRed según su contrato?"
+    uv run main.py --rag "¿Cuándo escalo un ticket de prioridad alta?" --k 3 --embedder fake
+    uv run main.py --rag "¿Qué pasa si PagosRed no cumple?" --tipo contrato --proveedor PagosRed
+    uv run main.py --rag "¿Qué pasó con el T-1016?" --modo hibrida
+    uv run main.py --rag "¿Cuánto tardan los de pagos en contestar?" --modo hibrida --rerank
+    uv run main.py --agent react --docs "El T-1042 lleva 6 horas sin respuesta: ¿escalo?"
 """
 
 from __future__ import annotations
@@ -19,8 +26,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -34,9 +41,12 @@ from contracts import (
     run_tool_loop,
 )
 from core.config import KNOWN_PROVIDERS, Settings, get_settings
-from core.errors import AllProvidersFailedError
+from core.errors import AllProvidersFailedError, ProviderError
 from core.llm_client import LLMClient, ToolCall
 from prompting import PromptKit, PromptNotFoundError
+
+if TYPE_CHECKING:
+    from knowledge.store import VectorStore
 
 # --demo: solo Gemini, sin fallbacks. Funciona aunque GroqProvider siga con su TODO.
 DEMO_TICKET_ID = "T-1043"
@@ -53,6 +63,10 @@ PROMPT_VARIABLES = {
 TICKETS_DB_PATH = DATA_DIR / "tickets_db.json"
 # Clase 5: nombre, permiso, resultado e intentos de cada herramienta (nunca argumentos).
 TOOL_LOG_PATH = Path(__file__).parent / "logs" / "tool_calls.jsonl"
+# Clase 6: RAG sobre data/docs, indexados con scripts/ingest_docs.py.
+RAG_K = 5
+# Clase 7: los modos de knowledge/retrieval.py (aquí sin importarlo: carga ChromaDB).
+RAG_MODOS = ("vector", "bm25", "hibrida")
 
 # Herramientas disponibles en el modo --tools.
 TOOLS = [BUSCAR_TICKET, CONSULTAR_PROVEEDOR]
@@ -130,7 +144,62 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="operador",
         help="Con --agent, rol para el ToolRunner: lectura u operador (Clase 5).",
     )
+    parser.add_argument(
+        "--rag",
+        metavar="PREGUNTA",
+        help="Responde con los documentos de operaciones y cita las fuentes (Clase 6).",
+    )
+    parser.add_argument(
+        "--k", type=int, help=f"Con --rag, cuántos chunks recuperar (por defecto {RAG_K})."
+    )
+    parser.add_argument(
+        "--embedder",
+        choices=("gemini", "fake"),
+        help="Con --rag, embedder del índice (por defecto gemini; fake no usa red ni cuota).",
+    )
+    parser.add_argument(
+        "--tipo",
+        choices=("runbook", "politica", "contrato", "faq"),
+        help="Con --rag, busca solo en documentos de este tipo.",
+    )
+    parser.add_argument(
+        "--proveedor", help='Con --rag, busca solo en documentos de este proveedor ("PagosRed").'
+    )
+    parser.add_argument(
+        "--modo",
+        choices=RAG_MODOS,
+        default="vector",
+        help="Con --rag, cómo buscar: vector (Clase 6), bm25 o hibrida (Clase 7).",
+    )
+    parser.add_argument(
+        "--reescribir",
+        action="store_true",
+        help="Con --rag, el LLM convierte la pregunta en varias consultas (Clase 7).",
+    )
+    parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help="Con --rag, el LLM califica los candidatos y deja solo los relevantes (Clase 7).",
+    )
+    parser.add_argument(
+        "--docs",
+        action="store_true",
+        help="Con --agent, agrega buscar_documentos: búsqueda híbrida en data/docs (Clase 7).",
+    )
     args = parser.parse_args(argv)
+    if args.rag is not None:
+        others = (args.prompt, args.ticket, args.agent, args.prompt_name, args.demo)
+        if any(others) or args.structured or args.tools or args.docs:
+            parser.error("--rag recibe la pregunta y no se combina con otros modos.")
+        return args
+    if args.k is not None or (args.embedder is not None and not args.docs):
+        parser.error("--k requiere --rag; --embedder requiere --rag o --docs.")
+    if args.tipo is not None or args.proveedor is not None:
+        parser.error("--tipo y --proveedor requieren --rag.")
+    if args.modo != "vector" or args.reescribir or args.rerank:
+        parser.error("--modo, --reescribir y --rerank requieren --rag.")
+    if args.docs and (not args.agent or args.mcp):
+        parser.error("--docs requiere --agent y no se combina con --mcp.")
     if args.verify and not args.agent:
         parser.error("--verify requiere --agent.")
     if args.mcp and not args.agent:
@@ -231,10 +300,16 @@ def run_agent(
     *,
     mcp: bool = False,
     rol: str = "operador",
+    docs: bool = False,
+    embedder: str | None = None,
 ) -> int:
     from agents import PlanAndExecute, ReActAgent, verify_and_revise
     from agents.tools import ToolRunner
-    from contracts.tool_schemas import ACTUALIZAR_ESTADO, CREAR_TICKET, LISTAR_TICKETS_POR_PROVEEDOR
+    from contracts.tool_schemas import (
+        ACTUALIZAR_ESTADO,
+        CREAR_TICKET,
+        LISTAR_TICKETS_POR_PROVEEDOR,
+    )
 
     actions: list[str] = []
 
@@ -266,8 +341,20 @@ def run_agent(
         # El agente puede proponer actualizar_estado; el ToolRunner decide según el rol.
         extras = [ACTUALIZAR_ESTADO, LISTAR_TICKETS_POR_PROVEEDOR, CREAR_TICKET]
         tools = [*TOOLS, *(tool for tool in extras if tool not in TOOLS)]
-        runner = ToolRunner(tools, rol=rol, log_path=TOOL_LOG_PATH, request_id=uuid.uuid4().hex)
-        print(f"{GRAY}herramientas: locales · rol {rol}{RESET}")
+        if docs:
+            # Clase 7: la búsqueda en documentos es una herramienta más del agente.
+            from knowledge.retrieval import Retriever
+            from knowledge.store import EmbeddingMismatch
+            from tools.documentos import buscar_documentos_tool
+
+            try:
+                store = open_docs_store(embedder)
+            except (LookupError, EmbeddingMismatch) as e:
+                return fail(str(e))
+            tools.append(buscar_documentos_tool(Retriever(store, modo="hibrida")))
+        runner = ToolRunner(tools, rol=rol, log_path=TOOL_LOG_PATH)
+        con_docs = " + documentos" if docs else ""
+        print(f"{GRAY}herramientas: locales{con_docs} · rol {rol}{RESET}")
         result = agent_cls(client, tools, on_event=on_event, runner=runner).run(question)
     respuesta, checked = result.respuesta, None
     llamadas, tokens, cost_usd = result.llamadas, result.tokens, result.cost_usd
@@ -339,8 +426,78 @@ def build_client(args: argparse.Namespace) -> LLMClient:
         return LLMClient.from_settings(settings)
 
 
+def open_docs_store(embedder: str | None) -> VectorStore:
+    """Abre el índice de data/docs. Lanza `LookupError` si no existe o está vacío."""
+    from knowledge.embeddings import make_embedder
+    from knowledge.store import STORE_PATH, open_store
+
+    ingest_hint = "corre primero `uv run scripts/ingest_docs.py data/docs`"
+    if not Path(STORE_PATH).exists():
+        raise LookupError(f"no hay índice de documentos en {STORE_PATH}; {ingest_hint}.")
+    store = open_store(make_embedder(embedder or "gemini"))
+    if store.count() == 0:
+        raise LookupError(f"el índice de documentos está vacío; {ingest_hint}.")
+    return store
+
+
+def run_rag(args: argparse.Namespace) -> int:
+    """`--rag`: busca en el índice, responde con citas e imprime las fuentes (S43)."""
+    from knowledge.rag import UMBRAL, answer
+    from knowledge.retrieval import Retriever
+    from knowledge.store import EmbeddingMismatch, build_where
+
+    try:
+        store = open_docs_store(args.embedder)
+    except (LookupError, EmbeddingMismatch) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+
+    retriever = None
+    try:
+        client = build_client(args)
+        where = build_where(args.tipo, args.proveedor)
+        if args.modo == "vector" and not (args.reescribir or args.rerank):
+            # Clase 6: búsqueda vectorial y el umbral de distancia decide qué pasa.
+            result = answer(client, store, args.rag, k=args.k or RAG_K, where=where, umbral=UMBRAL)
+        else:
+            # Clase 7: sin umbral de distancia; deciden el reranker o el modelo.
+            retriever = Retriever(
+                store,
+                modo=args.modo,
+                client=client,
+                reescribir=args.reescribir,
+                rerank=args.rerank,
+            )
+            result = answer(
+                client, retriever, args.rag, k=args.k or RAG_K, where=where, umbral=None
+            )
+    except ValidationError as e:
+        return fail(config_error(e))
+    except StructuredOutputError as e:
+        return fail(f"el modelo no devolvió una respuesta válida. {e}")
+    except AllProvidersFailedError as e:
+        lines = "\n".join(f"  - {type(err).__name__}: {err}" for err in e.errors)
+        return fail(f"ningún proveedor pudo responder.\n{lines}")
+    except ProviderError as e:
+        return fail(f"no se pudo calcular el embedding de la pregunta. {e}")
+
+    print(result.respuesta.strip())
+    if result.encontrado:
+        print("\nFuentes:")
+        for fuente in result.fuentes:
+            print(f"  [{fuente['n']}] {fuente['etiqueta']}")
+    if retriever:
+        pasos = [args.modo, *(["reescritura"] if args.reescribir else [])]
+        pasos += ["rerank"] if args.rerank else []
+        consultas = " · ".join(f"«{c}»" for c in retriever.consultas)
+        print(f"{GRAY}búsqueda: {' + '.join(pasos)} · consultas: {consultas}{RESET}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.rag is not None:
+        return run_rag(args)
 
     try:
         text = find_ticket(args.ticket)["descripcion"] if args.ticket else args.prompt
@@ -377,7 +534,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.agent:
         return run_agent(
-            client, args.agent, text, args.verbose, args.verify, mcp=args.mcp, rol=args.rol
+            client,
+            args.agent,
+            text,
+            args.verbose,
+            args.verify,
+            mcp=args.mcp,
+            rol=args.rol,
+            docs=args.docs,
+            embedder=args.embedder,
         )
 
     if args.structured or args.tools:

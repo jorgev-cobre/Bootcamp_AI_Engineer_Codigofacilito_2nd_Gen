@@ -11,11 +11,11 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,9 +34,6 @@ Rol = Literal["lectura", "operador"]
 
 logger = logging.getLogger(__name__)
 
-# Lo fija el ToolRunner antes de llamar al handler. El modelo no lo ve ni lo elige.
-current_request_id: ContextVar[str] = ContextVar("tool_request_id", default="")
-
 
 @dataclass(frozen=True)
 class ToolPolicy:
@@ -51,7 +48,10 @@ POLITICAS: dict[str, ToolPolicy] = {
     "actualizar_estado": ToolPolicy("escritura"),
     "consultar_proveedor": ToolPolicy("lectura", timeout_s=2),
     "listar_tickets_por_proveedor": ToolPolicy("lectura", timeout_s=2),
+    # Escritura idempotente gracias a la idempotency_key: el reintento no duplica.
     "crear_ticket": ToolPolicy("escritura", idempotente=True),
+    # Clase 7: embedding de la consulta y, con rerank, una llamada al LLM.
+    "buscar_documentos": ToolPolicy("lectura", timeout_s=30),
 }
 ROLES: dict[Rol, set[Permiso]] = {"lectura": {"lectura"}, "operador": {"lectura", "escritura"}}
 
@@ -93,12 +93,14 @@ class ToolRunner:
         request_id: str | None = None,
     ) -> None:
         self.tools = {tool.name: tool for tool in tools}
+        # Identifica la petición del usuario. Lo da quien crea el runner (la CLI, el
+        # server MCP); si no, uno nuevo por runner. Nunca sale del modelo.
+        self.request_id = request_id or uuid.uuid4().hex
         self.rol = rol
         self.politicas = politicas
         self.sleep = sleep
         self.retries = retries
         self.log_path = Path(log_path) if log_path else None
-        self.request_id = request_id or ""
         self.eventos: list[dict] = []  # Lo que se registró, en orden (útil en tests).
         self._llamadas: Counter[str] = Counter()
 
@@ -191,18 +193,10 @@ class ToolRunner:
         en segundo plano hasta terminar; solo dejamos de esperarlo. Por eso el timeout no
         sustituye a que el handler tenga sus propios límites (por ejemplo, en httpx).
         """
-        request_id = self.request_id
-
-        def invoke() -> dict:
-            token = current_request_id.set(request_id)
-            try:
-                return spec.handler(args)
-            finally:
-                current_request_id.reset(token)
-
+        kwargs = {"request_id": self.request_id} if spec.needs_request_id else {}
         pool = ThreadPoolExecutor(max_workers=1)
         try:
-            return pool.submit(invoke).result(timeout=timeout_s)
+            return pool.submit(spec.handler, args, **kwargs).result(timeout=timeout_s)
         finally:
             pool.shutdown(wait=False)
 

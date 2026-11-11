@@ -5,8 +5,9 @@
 
 Cada tool delega en un `ToolRunner`, así que el permiso, el tope de llamadas, el timeout y
 la validación de argumentos son los mismos que en local. El rol sale de `OPERADOR_ROL`
-(por defecto, "lectura"). La descripción de cada tool es la de su `ToolSpec` y las
-annotations salen de su `ToolPolicy`.
+(por defecto, "lectura") y el request_id de `OPERADOR_REQUEST_ID` (si falta, uno por
+proceso: en el Inspector, todas tus llamadas comparten request_id). La descripción de cada
+tool es la de su `ToolSpec` y las annotations salen de su `ToolPolicy`.
 
 Nada de este módulo escribe en stdout: en stdio, stdout es el canal del protocolo.
 """
