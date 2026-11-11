@@ -73,6 +73,25 @@ def test_long_fragments_are_trimmed(retriever):
     assert len(primero["texto"]) == TEXTO_MAX and primero["texto"].endswith("…")
 
 
+def test_the_agent_chooses_the_filters(retriever):
+    runner = ToolRunner([buscar_documentos_tool(retriever)])
+
+    salida = run(
+        runner, {"consulta": "tiempo de respuesta", "tipo": "contrato", "proveedor": "PagosRed"}
+    )
+
+    assert [r["ref"] for r in salida["resultados"]] == ["contratos/pagosred.pdf · p. 3"]
+
+
+def test_unknown_tipo_is_a_validation_error(retriever):
+    runner = ToolRunner([buscar_documentos_tool(retriever)])
+
+    salida = run(runner, {"consulta": "tiempo de respuesta", "tipo": "manual"})
+
+    assert salida["error"]["tipo"] == "validacion"
+    assert "tipo" in salida["error"]["mensaje"]
+
+
 def test_short_query_is_a_validation_error(retriever):
     runner = ToolRunner([buscar_documentos_tool(retriever)])
 

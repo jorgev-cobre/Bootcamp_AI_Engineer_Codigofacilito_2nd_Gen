@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from contracts.tool_schemas import BuscarDocumentosArgs, ToolSpec
 from knowledge.rag import etiqueta
+from knowledge.store import build_where
 
 if TYPE_CHECKING:
     from knowledge.retrieval import Retriever
@@ -27,9 +28,7 @@ def _recortar(texto: str) -> str:
 
 
 def buscar_documentos(args: BuscarDocumentosArgs, *, retriever: Retriever) -> dict:
-    # TODO(clase-7): práctica guiada. Pasa los filtros que eligió el agente:
-    # where=build_where(args.tipo, args.proveedor).
-    hits = retriever.search(args.consulta, k=K)
+    hits = retriever.search(args.consulta, k=K, where=build_where(args.tipo, args.proveedor))
     if not hits:
         return {
             "resultados": [],

@@ -100,8 +100,14 @@ class BuscarDocumentosArgs(BaseModel):
             "cláusulas, nombres de guardias"
         ),
     )
-    # TODO(clase-7): práctica guiada. Agrega `tipo` y `proveedor` para que el agente
-    # elija los filtros de la búsqueda.
+    tipo: Literal["runbook", "politica", "contrato", "faq"] | None = Field(
+        default=None,
+        description="Solo si la pregunta pide un tipo de documento, por ejemplo contrato",
+    )
+    proveedor: str | None = Field(
+        default=None,
+        description="Solo para contratos de un proveedor: PagosRed, NubeHost o Transportes Sierra",
+    )
 
 
 BUSCAR_TICKET = ToolSpec(
