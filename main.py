@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -352,7 +353,7 @@ def run_agent(
             except (LookupError, EmbeddingMismatch) as e:
                 return fail(str(e))
             tools.append(buscar_documentos_tool(Retriever(store, modo="hibrida")))
-        runner = ToolRunner(tools, rol=rol, log_path=TOOL_LOG_PATH)
+        runner = ToolRunner(tools, rol=rol, log_path=TOOL_LOG_PATH, request_id=uuid.uuid4().hex)
         con_docs = " + documentos" if docs else ""
         print(f"{GRAY}herramientas: locales{con_docs} · rol {rol}{RESET}")
         result = agent_cls(client, tools, on_event=on_event, runner=runner).run(question)

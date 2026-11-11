@@ -19,7 +19,6 @@ from tools.tickets import (
 
 ErrorTipo = Literal["validacion", "negocio", "transitorio", "permanente", "permiso", "limite"]
 EstadoTicket = Literal["abierto", "en revisión", "esperando proveedor", "resuelto"]
-Prioridad = Literal["baja", "media", "alta"]
 
 
 def tool_error(
@@ -46,9 +45,6 @@ class ToolSpec:
     description: str
     args_model: type[BaseModel]
     handler: Callable[..., dict]
-    # Clase 5 (reto): el handler recibe además el `request_id` de quien llama. Lo pasa el
-    # ToolRunner; nunca sale de los argumentos del modelo.
-    needs_request_id: bool = False
 
     def to_openai(self) -> dict:
         """Definición de la herramienta en el formato `tools` de la API compatible con OpenAI.
@@ -81,9 +77,9 @@ class ListarTicketsPorProveedorArgs(BaseModel):
 
 
 class CrearTicketArgs(BaseModel):
-    asunto: str = Field(min_length=5, max_length=120, description="Resumen en una línea")
-    descripcion: str = Field(min_length=10, description="Qué pasa, desde cuándo y a quién afecta")
-    prioridad: Prioridad
+    asunto: str = Field(min_length=1, description="Título corto del problema o la solicitud.")
+    descripcion: str = Field(min_length=1, description="Qué pasa, con el detalle del usuario.")
+    prioridad: Literal["baja", "media", "alta"]
 
 
 class BuscarDocumentosArgs(BaseModel):
@@ -155,12 +151,11 @@ LISTAR_TICKETS_POR_PROVEEDOR = ToolSpec(
 CREAR_TICKET = ToolSpec(
     name="crear_ticket",
     description=(
-        "Crea un ticket nuevo con asunto, descripción y prioridad (baja, media o alta) y "
-        "regresa su ID. Úsala solo si el usuario pide crear o levantar un ticket. Si la "
-        "repites con el mismo asunto y descripción en la misma conversación, no se crea otro: "
-        "regresa el mismo ticket con duplicado_evitado = true."
+        "Crea un ticket nuevo con asunto, descripción y prioridad (baja, media o alta). "
+        "Úsala solo si el usuario pide abrir un ticket y no existe uno para ese caso. "
+        "No la uses para cambiar el estado de un ticket que ya existe: para eso está "
+        "actualizar_estado."
     ),
     args_model=CrearTicketArgs,
     handler=crear_ticket,
-    needs_request_id=True,
 )

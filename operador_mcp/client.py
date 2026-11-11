@@ -81,18 +81,17 @@ class MCPToolset:
         rol: str = "lectura",
         timeout_s: float = DEFAULT_TIMEOUT_S,
         server_log: Path | None = SERVER_LOG,
-        request_id: str | None = None,
     ) -> None:
         self.command = command or sys.executable
         self.args = args if args is not None else ["-m", "operador_mcp.server"]
         # El hijo no hereda el entorno por defecto (el SDK solo pasa PATH, HOME, ...).
         # Un request_id por sesión: reintentar crear_ticket en la misma corrida no duplica.
-        self.request_id = request_id or (env or {}).get("OPERADOR_REQUEST_ID") or uuid.uuid4().hex
+        request_id = (env or {}).get("OPERADOR_REQUEST_ID") or uuid.uuid4().hex
         self.env = {
             **os.environ,
             **(env or {}),
             "OPERADOR_ROL": rol,
-            "OPERADOR_REQUEST_ID": self.request_id,
+            "OPERADOR_REQUEST_ID": request_id,
         }
         self.timeout_s = timeout_s
         self.server_log = server_log
