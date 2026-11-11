@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 COMPANY = "Acme Operaciones"
-OBSERVATION_LIMIT = 1_500
+OBSERVATION_LIMIT = 4_000  # Clase 7: caben 3 fragmentos de documentos, no solo un ticket.
 TRUNCATION_MARK = "[…recortado]"
 
 # on_event(tipo, datos): "paso" {n, paso}, "observacion" {n, observacion},

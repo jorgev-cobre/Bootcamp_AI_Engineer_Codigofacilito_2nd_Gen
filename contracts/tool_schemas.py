@@ -92,6 +92,18 @@ class CrearTicketArgs(BaseModel):
     prioridad: Prioridad
 
 
+class BuscarDocumentosArgs(BaseModel):
+    consulta: str = Field(
+        min_length=3,
+        description=(
+            "Qué buscar, con las palabras del documento: IDs de ticket, proveedores, "
+            "cláusulas, nombres de guardias"
+        ),
+    )
+    # TODO(clase-7): práctica guiada. Agrega `tipo` y `proveedor` para que el agente
+    # elija los filtros de la búsqueda.
+
+
 BUSCAR_TICKET = ToolSpec(
     name="buscar_ticket",
     description=(

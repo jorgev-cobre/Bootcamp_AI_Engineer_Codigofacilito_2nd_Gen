@@ -27,6 +27,7 @@ class Hit:
     texto: str
     metadatos: dict
     distancia: float
+    relevancia: int | None = None  # 0-3, solo si pasó por el reranker (Clase 7)
 
 
 class EmbeddingMismatch(Exception):
@@ -73,6 +74,30 @@ class VectorStore:
                 r["ids"][0], r["documents"][0], r["metadatas"][0], r["distances"][0], strict=True
             )
         ]
+
+    def get_hits(self, chunk_ids: list[str], pregunta: str) -> list[Hit]:
+        """Los chunks `chunk_ids`, en ese orden, con su distancia coseno a `pregunta`.
+
+        Sirve para los chunks que llegaron por BM25: también tienen distancia, aunque la
+        búsqueda vectorial no los haya traído.
+        """
+        if not chunk_ids:
+            return []
+        consulta = self.embedder.embed_query(pregunta)
+        r = self.collection.get(ids=chunk_ids, include=["documents", "metadatas", "embeddings"])
+        por_id = {
+            chunk_id: (texto, metadatos, vector)
+            for chunk_id, texto, metadatos, vector in zip(
+                r["ids"], r["documents"], r["metadatas"], r["embeddings"], strict=True
+            )
+        }
+        hits = []
+        for chunk_id in chunk_ids:
+            texto, metadatos, vector = por_id[chunk_id]
+            # Vectores normalizados: coseno = producto punto.
+            similitud = sum(a * b for a, b in zip(consulta, vector, strict=True))
+            hits.append(Hit(chunk_id, texto, metadatos, float(1 - similitud)))
+        return hits
 
     def stored_hash(self, doc_id: str) -> str | None:
         """`hash` del documento indexado, o `None` si no está en el índice."""

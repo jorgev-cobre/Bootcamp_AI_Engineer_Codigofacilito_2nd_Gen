@@ -18,6 +18,7 @@ from prompting import PromptKit
 
 if TYPE_CHECKING:
     from core.llm_client import LLMClient
+    from knowledge.retrieval import Retriever
     from knowledge.store import Hit, VectorStore
 
 UMBRAL = 0.6  # distancia coseno máxima; ilustrativo, se calibra con el golden set
@@ -83,14 +84,21 @@ def rag_messages(pregunta: str, hits: list[Hit]) -> list[dict]:
 
 def answer(
     client: LLMClient,
-    store: VectorStore,
+    store: VectorStore | Retriever,
     pregunta: str,
     k: int = 5,
     where: dict | None = None,
-    umbral: float = UMBRAL,
+    umbral: float | None = UMBRAL,
 ) -> RagResult:
-    """Busca, filtra por `umbral`, responde con citas y arma las fuentes (S42)."""
-    hits = [h for h in store.search(pregunta, k=k, where=where) if h.distancia <= umbral]
+    """Busca, filtra por `umbral`, responde con citas y arma las fuentes (S42).
+
+    `store` es cualquier objeto con `search(pregunta, k, where)`: el `VectorStore` de la
+    Clase 6 o el `Retriever` de la Clase 7. Con `umbral=None` no se filtra por distancia:
+    decide el reranker o el propio modelo, con `encontrado=false`.
+    """
+    hits = store.search(pregunta, k=k, where=where)
+    if umbral is not None:
+        hits = [h for h in hits if h.distancia <= umbral]
     if not hits:
         return RagResult.no_encontrado(pregunta)
 
