@@ -7,6 +7,7 @@ import pytest
 
 from context.manager import estimate_tokens
 from knowledge.chunking import (
+    CHUNK_TOKENS,
     chunk_document,
     chunk_file,
     chunk_fixed,
@@ -87,11 +88,14 @@ def test_ids_are_deterministic(corpus):
 
 
 def test_chunk_document_picks_strategy_by_tipo_doc(corpus):
+    # Contra CHUNK_TOKENS y no contra 400: la decisión del reto puede cambiar el tamaño.
     by_tipo = {d.metadatos["tipo_doc"]: d for d in corpus}
-    assert chunk_document(by_tipo["runbook"]) == chunk_markdown(by_tipo["runbook"])
-    assert chunk_document(by_tipo["politica"]) == chunk_markdown(by_tipo["politica"])
-    assert chunk_document(by_tipo["contrato"]) == chunk_recursive(by_tipo["contrato"])
-    assert chunk_document(by_tipo["faq"]) == chunk_fixed(by_tipo["faq"], 400, overlap=60)
+    n = CHUNK_TOKENS
+    assert chunk_document(by_tipo["runbook"]) == chunk_markdown(by_tipo["runbook"], n)
+    assert chunk_document(by_tipo["politica"]) == chunk_markdown(by_tipo["politica"], n)
+    assert chunk_document(by_tipo["contrato"]) == chunk_recursive(by_tipo["contrato"], n)
+    traslape = round(n * 0.15)
+    assert chunk_document(by_tipo["faq"]) == chunk_fixed(by_tipo["faq"], n, overlap=traslape)
 
 
 def test_chunk_file_numbers_pages_continuously(corpus):

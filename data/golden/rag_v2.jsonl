@@ -1,0 +1,16 @@
+{"id": "q01", "pregunta": "¿Cuándo escalo un ticket de prioridad alta?", "fuente_esperada": "politicas/escalamiento.md"}
+{"id": "q02", "pregunta": "¿Cuál es el tiempo de respuesta de PagosRed según su contrato?", "fuente_esperada": "contratos/pagosred.pdf"}
+{"id": "q03", "pregunta": "¿Qué pasa si PagosRed no cumple el tiempo de respuesta?", "fuente_esperada": "contratos/pagosred.pdf"}
+{"id": "q04", "pregunta": "¿Qué hago si hay cobros duplicados en la pasarela de pagos?", "fuente_esperada": "runbooks/caida-pagos.md"}
+{"id": "q05", "pregunta": "¿Qué hago si el portal de proveedores responde con error 503?", "fuente_esperada": "runbooks/portal-proveedores.md"}
+{"id": "q06", "pregunta": "¿Cómo reinicio la cola de pedidos?", "fuente_esperada": "runbooks/reinicio-colas.md"}
+{"id": "q07", "pregunta": "¿En qué horario cubre la guardia N1?", "fuente_esperada": "politicas/guardias.md"}
+{"id": "q08", "pregunta": "¿Qué crédito recibe Acme por cada hora que el portal hospedado por NubeHost no está disponible?", "fuente_esperada": "contratos/nubehost.pdf"}
+{"id": "q09", "pregunta": "¿Cómo restablezco mi contraseña?", "fuente_esperada": "faq/accesos.txt"}
+{"id": "q10", "pregunta": "¿Qué días se paga a los proveedores?", "fuente_esperada": "faq/facturacion.txt"}
+{"id": "q11", "pregunta": "¿Cuántos días de vacaciones tengo?", "fuente_esperada": null, "fuera_de_corpus": true}
+{"id": "q12", "pregunta": "¿Puedo compartir mi usuario con otra persona de mi equipo?", "fuente_esperada": "faq/accesos.txt", "nota": "dato al final de una sección larga"}
+{"id": "q13", "pregunta": "¿Quién queda como responsable de un ticket de prioridad alta cuando se escala a la Guardia N2?", "fuente_esperada": "politicas/escalamiento.md", "nota": "dato al final de una sección larga"}
+{"id": "q14", "pregunta": "Si después de reiniciar la cola un pedido se procesó dos veces, ¿dónde lo cancelo?", "fuente_esperada": "runbooks/reinicio-colas.md"}
+{"id": "q15", "pregunta": "¿Con cuántas horas de anticipación debe avisar NubeHost sus ventanas de mantenimiento?", "fuente_esperada": "contratos/nubehost.pdf"}
+{"id": "q16", "pregunta": "¿Cuál es el presupuesto de viáticos para un viaje de trabajo?", "fuente_esperada": null, "fuera_de_corpus": true}

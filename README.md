@@ -110,6 +110,9 @@ uv run scripts/compare_agents.py --repeat 3
 # RAG (Clase 6): indexar data/docs y medir hit@k del retrieval
 uv run scripts/ingest_docs.py data/docs
 uv run scripts/eval_retrieval.py --k 1 3 5
+
+# Tamaño de chunk y umbral con el golden set v2 (reto de la Clase 6)
+uv run scripts/compare_chunking.py --report reports/chunking.md
 ```
 
 `compare_prompts.py` usa un solo proveedor sin fallback (el primario o el de `--provider`). `main.py --prompt` usa solo el primario si la cadena de fallbacks no se puede armar (por ejemplo, mientras `GroqProvider` esté pendiente).

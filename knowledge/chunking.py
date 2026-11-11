@@ -15,6 +15,8 @@ from knowledge.ingest import Document
 
 SEPARATORS = ("\n\n", "\n", ". ")
 FIXED_OVERLAP_RATIO = 0.15  # 60 tokens de traslape con chunks de 400.
+# Tamaño por defecto de la ingesta; se eligió con scripts/compare_chunking.py (reto de la Clase 6).
+CHUNK_TOKENS = 400
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 
@@ -168,7 +170,7 @@ def chunk_markdown(doc: Document, max_tokens: int = 400) -> list[Chunk]:
     return _chunks(doc, _markdown_pieces(doc, max_tokens))
 
 
-def chunk_document(doc: Document, max_tokens: int = 400) -> list[Chunk]:
+def chunk_document(doc: Document, max_tokens: int = CHUNK_TOKENS) -> list[Chunk]:
     """Elige la estrategia por `tipo_doc`: runbook y politica → Markdown; contrato →
     recursiva; faq → fija (con 15% de traslape)."""
     tipo = doc.metadatos.get("tipo_doc")
@@ -179,7 +181,7 @@ def chunk_document(doc: Document, max_tokens: int = 400) -> list[Chunk]:
     return chunk_fixed(doc, max_tokens, overlap=round(max_tokens * FIXED_OVERLAP_RATIO))
 
 
-def chunk_file(docs: list[Document], max_tokens: int = 400) -> list[Chunk]:
+def chunk_file(docs: list[Document], max_tokens: int = CHUNK_TOKENS) -> list[Chunk]:
     """Chunks de todos los `Document` de un archivo (las páginas de un PDF), con `n`
     continuo entre páginas para que `chunk_id` sea único por archivo."""
     chunks: list[Chunk] = []
