@@ -13,8 +13,10 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Literal
 
 from knowledge.lexical import BM25Index
+from knowledge.rewrite import rewrite_query
 
 if TYPE_CHECKING:
+    from core.llm_client import LLMClient
     from knowledge.store import Hit, VectorStore
 
 Modo = Literal["vector", "bm25", "hibrida"]
@@ -42,17 +44,25 @@ class Retriever:
         store: VectorStore,
         *,
         modo: Modo = "hibrida",
+        client: LLMClient | None = None,
+        reescribir: bool = False,
         bm25: BM25Index | None = None,
         candidatos: int = CANDIDATOS,
     ) -> None:
+        if reescribir and client is None:
+            raise ValueError("reescribir necesita un LLMClient")
         self.store = store
         self.modo = modo
+        self.client = client
+        self.con_reescritura = reescribir
         self.candidatos = candidatos
         self.bm25 = bm25 or (BM25Index.from_store(store) if modo != "vector" else None)
         self.consultas: list[str] = []  # Las de la última búsqueda, para mostrarlas.
 
     def search(self, pregunta: str, k: int = 5, where: dict | None = None) -> list[Hit]:
         self.consultas = [pregunta]
+        if self.con_reescritura:
+            self.consultas += rewrite_query(self.client, pregunta)
 
         rankings: list[list[str]] = []
         for consulta in self.consultas:
