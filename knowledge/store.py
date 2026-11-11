@@ -116,7 +116,13 @@ def delete_store(path: str = STORE_PATH, name: str = COLLECTION) -> None:
 
 
 def build_where(tipo: str | None = None, proveedor: str | None = None) -> dict | None:
-    if tipo is None and proveedor is None:
+    filtros = []
+    if tipo is not None:
+        filtros.append({"tipo_doc": tipo})
+    if proveedor is not None:
+        filtros.append({"proveedor": proveedor})
+    if not filtros:
         return None
-    # TODO(clase-6): práctica guiada. Un filtro → dict simple; dos filtros → {"$and": [...]}.
-    raise NotImplementedError("build_where: práctica guiada de la Clase 6")
+    if len(filtros) == 1:
+        return filtros[0]
+    return {"$and": filtros}  # Chroma no acepta dos llaves en el mismo dict.

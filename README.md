@@ -80,6 +80,7 @@ uv run main.py --agent react --rol lectura "Marca el T-1042 como resuelto"
 # RAG sobre los documentos de operaciones (Clase 6; antes corre scripts/ingest_docs.py)
 uv run main.py --rag "¿Cuál es el tiempo de respuesta de PagosRed según su contrato?"
 uv run main.py --rag "¿Cuándo escalo un ticket de prioridad alta?" --k 3 --embedder fake
+uv run main.py --rag "¿Qué pasa si PagosRed no cumple el tiempo de respuesta?" --tipo contrato --proveedor PagosRed
 ```
 
 Cada llamada imprime la respuesta y una línea gris con `proveedor · modelo · tokens in/out · latencia · costo`, y agrega una línea JSON por intento a `logs/llm_calls.jsonl`. Con `--prompt`, el log incluye `prompt_name` y `prompt_version`.

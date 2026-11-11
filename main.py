@@ -15,6 +15,7 @@ Uso:
     uv run main.py --agent react "Crea un ticket: el portal de pagos rechaza tarjetas"
     uv run main.py --rag "¿Cuál es el tiempo de respuesta de PagosRed según su contrato?"
     uv run main.py --rag "¿Cuándo escalo un ticket de prioridad alta?" --k 3 --embedder fake
+    uv run main.py --rag "¿Qué pasa si PagosRed no cumple?" --tipo contrato --proveedor PagosRed
 """
 
 from __future__ import annotations
@@ -147,6 +148,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=("gemini", "fake"),
         help="Con --rag, embedder del índice (por defecto gemini; fake no usa red ni cuota).",
     )
+    parser.add_argument(
+        "--tipo",
+        choices=("runbook", "politica", "contrato", "faq"),
+        help="Con --rag, busca solo en documentos de este tipo.",
+    )
+    parser.add_argument(
+        "--proveedor", help='Con --rag, busca solo en documentos de este proveedor ("PagosRed").'
+    )
     args = parser.parse_args(argv)
     if args.rag is not None:
         others = (args.prompt, args.ticket, args.agent, args.prompt_name, args.demo)
@@ -155,6 +164,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         return args
     if args.k is not None or args.embedder is not None:
         parser.error("--k y --embedder requieren --rag.")
+    if args.tipo is not None or args.proveedor is not None:
+        parser.error("--tipo y --proveedor requieren --rag.")
     if args.verify and not args.agent:
         parser.error("--verify requiere --agent.")
     if args.mcp and not args.agent:
@@ -371,7 +382,7 @@ def run_rag(args: argparse.Namespace) -> int:
     """`--rag`: busca en el índice, responde con citas e imprime las fuentes (S43)."""
     from knowledge.embeddings import make_embedder
     from knowledge.rag import answer
-    from knowledge.store import STORE_PATH, EmbeddingMismatch, open_store
+    from knowledge.store import STORE_PATH, EmbeddingMismatch, build_where, open_store
 
     ingest_hint = "corre primero `uv run scripts/ingest_docs.py data/docs`"
     if not Path(STORE_PATH).exists():
@@ -390,7 +401,8 @@ def run_rag(args: argparse.Namespace) -> int:
 
     try:
         client = build_client(args)
-        result = answer(client, store, args.rag, k=args.k or RAG_K)
+        where = build_where(args.tipo, args.proveedor)
+        result = answer(client, store, args.rag, k=args.k or RAG_K, where=where)
     except ValidationError as e:
         return fail(config_error(e))
     except StructuredOutputError as e:

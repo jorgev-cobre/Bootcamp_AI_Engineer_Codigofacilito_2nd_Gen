@@ -87,6 +87,37 @@ def test_build_where_without_filters_is_none():
     assert build_where() is None
 
 
-def test_build_where_is_the_guided_practice():
-    with pytest.raises(NotImplementedError):
-        build_where(tipo="politica")
+def test_build_where_with_one_or_two_filters():
+    assert build_where(tipo="politica") == {"tipo_doc": "politica"}
+    assert build_where(proveedor="PagosRed") == {"proveedor": "PagosRed"}
+    assert build_where(tipo="contrato", proveedor="PagosRed") == {
+        "$and": [{"tipo_doc": "contrato"}, {"proveedor": "PagosRed"}]
+    }
+
+
+def test_search_filtered_by_tipo_returns_only_the_policy(store):
+    texto = "Tiempo de respuesta de PagosRed para incidentes de prioridad alta"
+    store.index_document(*document("politicas/sla.md", [texto]))
+    store.index_document(
+        *document("contratos/pagosred.pdf", [texto], tipo_doc="contrato", proveedor="PagosRed")
+    )
+
+    hits = store.search("tiempo de respuesta de PagosRed", k=5, where=build_where(tipo="politica"))
+
+    assert [h.metadatos["fuente"] for h in hits] == ["politicas/sla.md"]
+
+
+def test_search_with_two_filters(store):
+    texto = "Penalización por incumplir el tiempo de respuesta"
+    store.index_document(
+        *document("contratos/pagosred.pdf", [texto], tipo_doc="contrato", proveedor="PagosRed")
+    )
+    store.index_document(
+        *document("contratos/nubehost.pdf", [texto], tipo_doc="contrato", proveedor="NubeHost")
+    )
+    store.index_document(*document("politicas/sla.md", [texto]))
+
+    where = build_where(tipo="contrato", proveedor="PagosRed")
+    hits = store.search("penalización por tiempo de respuesta", k=5, where=where)
+
+    assert [h.metadatos["fuente"] for h in hits] == ["contratos/pagosred.pdf"]
