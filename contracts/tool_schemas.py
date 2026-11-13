@@ -118,6 +118,8 @@ class ConsultarGrafoArgs(BaseModel):
             "(NubeHost), un equipo (Finanzas), una guardia (N2) o un servicio"
         ),
     )
+    # TODO(clase-8): práctica guiada. Agrega `hasta`, opcional: otra entidad, para que el
+    # agente pregunte qué conecta a las dos.
 
 
 BUSCAR_TICKET = ToolSpec(

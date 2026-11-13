@@ -13,8 +13,13 @@ from tools.grafo import consultar_grafo_tool
 
 
 @pytest.fixture(scope="module")
-def runner() -> ToolRunner:
-    kg = build_graph(load_chunks(ROOT / "data" / "docs"))
+def kg():
+    return build_graph(load_chunks(ROOT / "data" / "docs"))
+
+
+@pytest.fixture
+def runner(kg) -> ToolRunner:
+    # Un runner por test: la política permite pocas llamadas por herramienta.
     return ToolRunner([consultar_grafo_tool(kg)], rol="lectura")
 
 

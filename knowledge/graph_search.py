@@ -13,12 +13,12 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+import networkx as nx
+
 from knowledge.graph_build import menciones
 from knowledge.lexical import matches
 
 if TYPE_CHECKING:
-    import networkx as nx
-
     from knowledge.graph import KnowledgeGraph
 
 ALPHA = 0.85  # Probabilidad de seguir caminando; con 1 − α se regresa a una semilla.
@@ -87,6 +87,22 @@ def _fuente(kg: KnowledgeGraph, fuente: str) -> str:
     return kg.g.nodes[nodo]["ref"] if nodo in kg.g else fuente
 
 
+def _etiqueta(kg: KnowledgeGraph, nodo: str) -> str:
+    """El nombre de una entidad o la ref de un chunk."""
+    return kg.g.nodes[nodo].get("ref") or kg.nombre(nodo)
+
+
+def hecho_entre(kg: KnowledgeGraph, u: str, v: str) -> str:
+    """La relación entre dos nodos vecinos, en la dirección en que existe, con sus fuentes."""
+    if not kg.g.has_edge(u, v):
+        u, v = v, u
+    datos = next(iter(kg.g.get_edge_data(u, v).values()))
+    hecho = f"{_etiqueta(kg, u)} {datos['relacion']} {_etiqueta(kg, v)}"
+    if datos["relacion"] == "menciona":  # El chunk que menciona ya es la fuente.
+        return hecho
+    return f"{hecho} [{', '.join(_fuente(kg, f) for f in datos['fuentes'])}]"
+
+
 def hechos(kg: KnowledgeGraph, pregunta: str, limite: int = 10) -> list[str]:
     """Relaciones entre entidades, de la más cercana a la más lejana, con sus fuentes.
 
@@ -102,8 +118,26 @@ def hechos(kg: KnowledgeGraph, pregunta: str, limite: int = 10) -> list[str]:
         and v in puntajes
     ]
     candidatas.sort(key=lambda item: (-item[0], item[1], item[2]))
-    return [
-        f"{kg.nombre(u)} {datos['relacion']} {kg.nombre(v)} "
-        f"[{', '.join(_fuente(kg, f) for f in datos['fuentes'])}]"
-        for _, u, v, datos in candidatas[:limite]
-    ]
+    return [hecho_entre(kg, u, v) for _, u, v, _ in candidatas[:limite]]
+
+
+def comunidades(kg: KnowledgeGraph, semilla: int = 42) -> list[set[str]]:
+    """Grupos de nodos más conectados entre sí que con el resto (Louvain), del más grande
+    al más chico, sin los chunks que quedaron solos.
+
+    GraphRAG de Microsoft usa Leiden jerárquico y le pide al LLM un reporte de cada grupo;
+    la búsqueda global responde con esos reportes. Aquí solo se calculan los grupos.
+    """
+    grupos = nx.community.louvain_communities(nx.Graph(kg.g), seed=semilla)
+    return sorted((g for g in grupos if len(g) > 1), key=lambda g: (-len(g), sorted(g)))
+
+
+def ruta(kg: KnowledgeGraph, origen: str, destino: str) -> list[str]:
+    """El camino más corto entre dos entidades, un hecho por salto ([] si no hay camino).
+
+    Explica por qué dos cosas están conectadas, con una fuente para citar en cada salto.
+    """
+    # TODO(clase-8): práctica guiada. Busca las semillas de `origen` y `destino` con
+    # `menciones`, el camino con `nx.shortest_path` sobre la vista no dirigida y escribe
+    # cada salto con `hecho_entre`. Sin camino (`nx.NetworkXNoPath`), regresa [].
+    raise NotImplementedError("ruta: práctica guiada de la Clase 8")

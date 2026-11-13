@@ -5,7 +5,7 @@ import pytest
 
 from knowledge.graph import KnowledgeGraph
 from knowledge.graph_build import build_graph, load_chunks
-from knowledge.graph_search import hechos, ppr, rank_chunks
+from knowledge.graph_search import comunidades, hechos, ppr, rank_chunks
 from knowledge.retrieval import Retriever
 from knowledge.store import Hit
 from scripts.eval_retrieval import ROOT
@@ -83,3 +83,11 @@ def test_the_retriever_uses_the_graph_as_one_more_ranking():
     assert store.consultas == []  # el modo grafo no hace búsqueda vectorial
     with pytest.raises(ValueError, match="necesita un KnowledgeGraph"):
         Retriever(store, modo="grafo")
+
+
+def test_communities_group_each_provider_with_its_tickets_and_contract(kg):
+    grupos = comunidades(kg)
+    pagos = next(g for g in grupos if "proveedor:PagosRed" in g)
+    assert {"ticket:T-1042", "ticket:T-1014", "chunk:contratos/pagosred.pdf#2"} <= pagos
+    assert "proveedor:NubeHost" not in pagos
+    assert all(len(g) > 1 for g in grupos)

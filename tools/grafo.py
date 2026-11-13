@@ -31,7 +31,7 @@ def consultar_grafo(args: ConsultarGrafoArgs, *, kg: KnowledgeGraph) -> dict:
             "documentos": [],
             "nota": SIN_ENTIDAD,
         }
-    return {
+    salida = {
         "entidades": [kg.nombre(nodo) for nodo in semillas],
         "hechos": hechos(kg, args.entidad, limite=LIMITE_HECHOS),
         "documentos": [
@@ -39,6 +39,9 @@ def consultar_grafo(args: ConsultarGrafoArgs, *, kg: KnowledgeGraph) -> dict:
             for chunk_id, _ in rank_chunks(kg, args.entidad, k=LIMITE_DOCUMENTOS)
         ],
     }
+    # TODO(clase-8): práctica guiada. Si el agente manda `hasta`, agrega
+    # salida["ruta"] = ruta(kg, args.entidad, args.hasta).
+    return salida
 
 
 def consultar_grafo_tool(kg: KnowledgeGraph) -> ToolSpec:
