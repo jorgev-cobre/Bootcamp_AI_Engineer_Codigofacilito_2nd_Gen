@@ -3,12 +3,13 @@
     uv run scripts/eval_multihop.py
     uv run scripts/eval_multihop.py --modos vector hibrida hibrida+rerank --detalle
     uv run scripts/eval_multihop.py --embedder fake --report reports/multihop.md
+    uv run scripts/eval_multihop.py --modos hibrida grafo hibrida+grafo --detalle
 
 Cada pregunta de data/golden/multihop_v1.jsonl necesita 2 o más documentos. Por modo:
 `recall@k` es la fracción de las `fuentes_esperadas` que llegan al top-k, promediada
 entre preguntas, y `completas` cuenta las preguntas en las que llegan todas. Los modos
 son los de eval_retrieval.py; los que tienen `+` llaman al LLM una vez por pregunta y
-por paso.
+por paso; `grafo` no llama al LLM.
 """
 
 from __future__ import annotations
@@ -21,12 +22,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))  # Para importar los paquetes del repo al correr como script.
 
 from knowledge.embeddings import make_embedder  # noqa: E402
+from knowledge.graph import GRAPH_PATH  # noqa: E402
 from knowledge.store import COLLECTION, STORE_PATH, EmbeddingMismatch, open_store  # noqa: E402
 from scripts.eval_retrieval import (  # noqa: E402
     MODOS,
     build_llm_client,
     load_golden,
+    load_graph,
     make_retriever,
+    usa_llm,
 )
 
 DEFAULT_GOLDEN = ROOT / "data" / "golden" / "multihop_v1.jsonl"
@@ -81,12 +85,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--detalle", action="store_true", help="Fuentes que faltan, por pregunta.")
     parser.add_argument("--report", type=Path, help="Además, escribe las tablas en este archivo.")
     parser.add_argument("--store", default=STORE_PATH, help=f"Carpeta del índice ({STORE_PATH}).")
+    parser.add_argument("--grafo", type=Path, default=GRAPH_PATH, help=f"Grafo ({GRAPH_PATH}).")
     parser.add_argument("--collection", default=COLLECTION, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     try:
         store = open_store(make_embedder(args.embedder), path=args.store, name=args.collection)
-    except (EmbeddingMismatch, ValueError) as e:
+        grafo = load_graph(args.modos, args.grafo)
+    except (EmbeddingMismatch, ValueError, LookupError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2
     if store.count() == 0:
@@ -97,10 +103,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     modos = list(dict.fromkeys(args.modos))
-    client = build_llm_client() if any("+" in modo for modo in modos) else None
+    client = build_llm_client() if any(usa_llm(modo) for modo in modos) else None
     golden = load_golden(args.golden)
     resultados = {
-        modo: evaluate(make_retriever(store, modo, client), golden, args.k) for modo in modos
+        modo: evaluate(make_retriever(store, modo, client, grafo), golden, args.k) for modo in modos
     }
 
     titulo = (

@@ -65,13 +65,13 @@ def menciones(kg: KnowledgeGraph, texto: str) -> list[str]:
 
 
 def add_chunk(kg: KnowledgeGraph, chunk: Chunk) -> str:
-    """El nodo del chunk, con su texto y su ref para citar."""
+    """El nodo del chunk, con su texto, sus metadatos (para filtrar) y su ref para citar."""
     nodo = kg.add_entidad(
         "chunk",
         chunk.chunk_id,
         texto=chunk.texto,
+        metadatos=chunk.metadatos,
         ref=etiqueta(chunk.metadatos),
-        fuente=chunk.metadatos["fuente"],
     )
     if chunk.metadatos.get("proveedor"):
         # Las páginas de un contrato dicen «el Proveedor»; el nombre está en los metadatos.
