@@ -43,6 +43,21 @@ def test_an_unknown_entity_gets_a_hint_instead_of_an_error(runner):
     assert salida["hechos"] == [] and "ID de ticket" in salida["nota"]
 
 
+def test_the_agent_asks_what_connects_two_entities(runner):
+    salida = run(runner, {"entidad": "T-1009", "hasta": "N3"})
+
+    # Hay dos caminos igual de cortos (la política de escalamiento y la de guardias).
+    primero, medio, ultimo = salida["ruta"]
+    assert primero == "T-1009 atendido_por Logística [tickets_db.json]"
+    assert medio.startswith("politicas/") and medio.endswith(" menciona Logística")
+    assert ultimo == medio.replace("Logística", "N3")
+    assert "ruta" not in run(runner, {"entidad": "T-1009"})
+
+
+def test_no_path_means_an_empty_route(runner):
+    assert run(runner, {"entidad": "T-1009", "hasta": "Acme Pagos"})["ruta"] == []
+
+
 def test_the_cli_only_adds_the_graph_to_an_agent():
     assert parse_args(["--agent", "react", "--grafo", "¿Y el T-1043?"]).grafo
     with pytest.raises(SystemExit):

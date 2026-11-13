@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from contracts.tool_schemas import ConsultarGrafoArgs, ToolSpec
 from knowledge.graph_build import menciones
-from knowledge.graph_search import hechos, rank_chunks
+from knowledge.graph_search import hechos, rank_chunks, ruta
 
 if TYPE_CHECKING:
     from knowledge.graph import KnowledgeGraph
@@ -39,8 +39,8 @@ def consultar_grafo(args: ConsultarGrafoArgs, *, kg: KnowledgeGraph) -> dict:
             for chunk_id, _ in rank_chunks(kg, args.entidad, k=LIMITE_DOCUMENTOS)
         ],
     }
-    # TODO(clase-8): práctica guiada. Si el agente manda `hasta`, agrega
-    # salida["ruta"] = ruta(kg, args.entidad, args.hasta).
+    if args.hasta:
+        salida["ruta"] = ruta(kg, args.entidad, args.hasta)
     return salida
 
 

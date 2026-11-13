@@ -137,7 +137,11 @@ def ruta(kg: KnowledgeGraph, origen: str, destino: str) -> list[str]:
 
     Explica por qué dos cosas están conectadas, con una fuente para citar en cada salto.
     """
-    # TODO(clase-8): práctica guiada. Busca las semillas de `origen` y `destino` con
-    # `menciones`, el camino con `nx.shortest_path` sobre la vista no dirigida y escribe
-    # cada salto con `hecho_entre`. Sin camino (`nx.NetworkXNoPath`), regresa [].
-    raise NotImplementedError("ruta: práctica guiada de la Clase 8")
+    inicio, fin = menciones(kg, origen), menciones(kg, destino)
+    if not inicio or not fin:
+        return []
+    try:
+        nodos = nx.shortest_path(kg.g.to_undirected(as_view=True), inicio[0], fin[0])
+    except nx.NetworkXNoPath:
+        return []
+    return [hecho_entre(kg, u, v) for u, v in zip(nodos, nodos[1:], strict=False)]
