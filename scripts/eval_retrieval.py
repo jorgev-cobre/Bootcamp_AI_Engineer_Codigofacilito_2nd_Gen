@@ -4,11 +4,13 @@
     uv run scripts/eval_retrieval.py --k 1 3 5 --embedder fake
     uv run scripts/eval_retrieval.py --modos vector bm25 hibrida --detalle
     uv run scripts/eval_retrieval.py --modos hibrida hibrida+rerank
+    uv run scripts/eval_retrieval.py --modos hibrida grafo hibrida+grafo
 
 Una pregunta cuenta como acierto en k si algún hit del top-k viene de su
 `fuente_esperada`. Para las preguntas fuera del corpus imprime el primer hit de cada modo
 y su distancia: sirve para calibrar `UMBRAL` en knowledge/rag.py. Los modos con
-`reescritura` o `rerank` llaman al LLM (una llamada por pregunta y por paso).
+`reescritura` o `rerank` llaman al LLM (una llamada por pregunta y por paso). Los modos
+con `grafo` leen var/grafo.json: créalo con `uv run scripts/build_graph.py`.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))  # Para importar los paquetes del repo al correr como script.
 
 from knowledge.embeddings import make_embedder  # noqa: E402
+from knowledge.graph import GRAPH_PATH, KnowledgeGraph  # noqa: E402
 from knowledge.rag import UMBRAL  # noqa: E402
 from knowledge.retrieval import Retriever  # noqa: E402
 from knowledge.store import COLLECTION, STORE_PATH, EmbeddingMismatch, open_store  # noqa: E402
@@ -34,6 +37,10 @@ MODOS = (
     "hibrida+reescritura",
     "hibrida+rerank",
     "hibrida+reescritura+rerank",
+    "grafo",
+    "bm25+grafo",
+    "hibrida+grafo",
+    "hibrida+grafo+rerank",
 )
 
 
@@ -50,7 +57,12 @@ def posicion(fuentes: list[str], esperada: str) -> int | None:
     return fuentes.index(esperada) + 1 if esperada in fuentes else None
 
 
-def make_retriever(store, modo: str, client=None) -> Retriever:
+def usa_llm(modo: str) -> bool:
+    """`reescritura` y `rerank` llaman al LLM; `grafo` no."""
+    return bool({"reescritura", "rerank"} & set(modo.split("+")))
+
+
+def make_retriever(store, modo: str, client=None, grafo: KnowledgeGraph | None = None):
     base, *pasos = modo.split("+")
     return Retriever(
         store,
@@ -58,7 +70,17 @@ def make_retriever(store, modo: str, client=None) -> Retriever:
         client=client,
         reescribir="reescritura" in pasos,
         rerank="rerank" in pasos,
+        grafo=grafo if "grafo" in (base, *pasos) else None,
     )
+
+
+def load_graph(modos: list[str], path: Path) -> KnowledgeGraph | None:
+    """El grafo, si algún modo lo usa. Lanza `LookupError` si no se ha construido."""
+    if not any("grafo" in modo for modo in modos):
+        return None
+    if not Path(path).exists():
+        raise LookupError(f"no hay grafo en {path}; corre `uv run scripts/build_graph.py`.")
+    return KnowledgeGraph.load(path)
 
 
 def build_llm_client():
@@ -76,12 +98,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--modos", nargs="+", choices=MODOS, default=["vector"])
     parser.add_argument("--detalle", action="store_true", help="Posición por pregunta y modo.")
     parser.add_argument("--store", default=STORE_PATH, help=f"Carpeta del índice ({STORE_PATH}).")
+    parser.add_argument("--grafo", type=Path, default=GRAPH_PATH, help=f"Grafo ({GRAPH_PATH}).")
     parser.add_argument("--collection", default=COLLECTION, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     try:
         store = open_store(make_embedder(args.embedder), path=args.store, name=args.collection)
-    except (EmbeddingMismatch, ValueError) as e:
+        grafo = load_graph(args.modos, args.grafo)
+    except (EmbeddingMismatch, ValueError, LookupError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2
     if store.count() == 0:
@@ -92,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     modos = list(dict.fromkeys(args.modos))
-    client = build_llm_client() if any("+" in modo for modo in modos) else None
+    client = build_llm_client() if any(usa_llm(modo) for modo in modos) else None
     golden = load_golden(args.golden)
     ks = sorted(set(args.k))
     k_max = ks[-1]
@@ -103,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     recuperadas: dict[str, dict[str, list[str]]] = {}
     primeros: dict[str, dict[str, str]] = {}
     for modo in modos:
-        retriever = make_retriever(store, modo, client)
+        retriever = make_retriever(store, modo, client, grafo)
         recuperadas[modo] = {
             q["id"]: [h.metadatos["fuente"] for h in retriever.search(q["pregunta"], k=k_max)]
             for q in preguntas

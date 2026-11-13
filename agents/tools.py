@@ -55,6 +55,8 @@ POLITICAS: dict[str, ToolPolicy] = {
     "crear_ticket": ToolPolicy("escritura", idempotente=True),
     # Clase 7: embedding de la consulta y, con rerank, una llamada al LLM.
     "buscar_documentos": ToolPolicy("lectura", timeout_s=30),
+    # Clase 8: el grafo está en memoria; no llama a ninguna API.
+    "consultar_grafo": ToolPolicy("lectura", timeout_s=2),
 }
 ROLES: dict[Rol, set[Permiso]] = {"lectura": {"lectura"}, "operador": {"lectura", "escritura"}}
 

@@ -1,7 +1,10 @@
 """Retrieval híbrido: vectores y BM25 fusionados con RRF, más reescritura y re-ranking.
 
-    pregunta → [reescritura] → por consulta: top-N vectorial y top-N BM25 → RRF
-             → [rerank] → top-k
+    pregunta → [reescritura] → por consulta: top-N vectorial, top-N BM25 y [top-N del
+             grafo] → RRF → [rerank] → top-k
+
+El grafo (Clase 8) es un ranking más: con `modo="grafo"` es el único, y con `grafo=` en
+otro modo se fusiona con los demás.
 
 `Retriever.search` tiene la misma firma que `VectorStore.search`: `answer()` de la
 Clase 6 lo usa sin cambios, y la herramienta `buscar_documentos` del agente también.
@@ -12,16 +15,18 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Literal
 
+from knowledge.graph_search import rank_chunks
 from knowledge.lexical import BM25Index
 from knowledge.rerank import rerank
 from knowledge.rewrite import rewrite_query
 
 if TYPE_CHECKING:
     from core.llm_client import LLMClient
+    from knowledge.graph import KnowledgeGraph
     from knowledge.store import Hit, VectorStore
 
-Modo = Literal["vector", "bm25", "hibrida"]
-MODOS: tuple[Modo, ...] = ("vector", "bm25", "hibrida")
+Modo = Literal["vector", "bm25", "hibrida", "grafo"]
+MODOS: tuple[Modo, ...] = ("vector", "bm25", "hibrida", "grafo")
 RRF_K = 60  # La constante del artículo original de RRF (Cormack et al., 2009).
 CANDIDATOS = 20  # Cuántos trae cada búsqueda y cuántos califica el reranker.
 
@@ -50,16 +55,20 @@ class Retriever:
         rerank: bool = False,
         bm25: BM25Index | None = None,
         candidatos: int = CANDIDATOS,
+        grafo: KnowledgeGraph | None = None,
     ) -> None:
         if (reescribir or rerank) and client is None:
             raise ValueError("reescribir y rerank necesitan un LLMClient")
+        if modo == "grafo" and grafo is None:
+            raise ValueError("el modo grafo necesita un KnowledgeGraph")
         self.store = store
         self.modo = modo
         self.client = client
         self.con_reescritura = reescribir
         self.con_rerank = rerank
         self.candidatos = candidatos
-        self.bm25 = bm25 or (BM25Index.from_store(store) if modo != "vector" else None)
+        self.grafo = grafo
+        self.bm25 = bm25 or (BM25Index.from_store(store) if modo in ("bm25", "hibrida") else None)
         self.consultas: list[str] = []  # Las de la última búsqueda, para mostrarlas.
 
     def search(self, pregunta: str, k: int = 5, where: dict | None = None) -> list[Hit]:
@@ -69,12 +78,15 @@ class Retriever:
 
         rankings: list[list[str]] = []
         for consulta in self.consultas:
-            if self.modo != "bm25":
+            if self.modo in ("vector", "hibrida"):
                 hits = self.store.search(consulta, k=self.candidatos, where=where)
                 rankings.append([h.chunk_id for h in hits])
-            if self.modo != "vector":
+            if self.modo in ("bm25", "hibrida"):
                 lex = self.bm25.search(consulta, k=self.candidatos, where=where)
                 rankings.append([h.chunk_id for h in lex])
+            if self.grafo is not None:
+                nodos = rank_chunks(self.grafo, consulta, k=self.candidatos, where=where)
+                rankings.append([chunk_id for chunk_id, _ in nodos])
 
         ids = [chunk_id for chunk_id, _ in rrf(rankings)][: self.candidatos]
         hits = self.store.get_hits(ids, pregunta)

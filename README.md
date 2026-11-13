@@ -11,6 +11,7 @@ El Agente Operador es un asistente para el equipo de operaciones de una empresa 
 - **Clase 5:** herramientas con política (`agents/tools.py`): permisos por rol, topes, timeout, reintentos y errores tipados; una herramienta de escritura idempotente y un server MCP (`operador_mcp/`).
 - **Clase 6:** RAG escrito a mano (`knowledge/`): ingesta, chunking, embeddings con Gemini, índice en ChromaDB y respuestas con citas.
 - **Clase 7:** RAG agéntico: búsqueda híbrida (BM25 + vectores, fusionados con RRF), reescritura de la pregunta, re-ranking con el LLM y `buscar_documentos` como herramienta del agente.
+- **Clase 8:** GraphRAG con NetworkX: un grafo de tickets, proveedores, equipos, guardias, servicios y chunks, construido con datos, reglas y el LLM; PageRank personalizado para preguntas de varios saltos y `consultar_grafo` como herramienta del agente.
 
 ## Qué se construye en cada bloque
 
@@ -87,6 +88,10 @@ uv run main.py --rag "¿Qué pasa si PagosRed no cumple el tiempo de respuesta?"
 uv run main.py --rag "¿Qué pasó con el T-1016?" --modo hibrida
 uv run main.py --rag "¿Cuánto tardan los de pagos en contestar?" --modo hibrida --reescribir --rerank
 uv run main.py --agent react --docs "El T-1042 lleva 6 horas sin respuesta de PagosRed. ¿Ya hay que escalar?"
+
+# GraphRAG (Clase 8; antes corre scripts/build_graph.py)
+uv run main.py --rag "¿Qué penalización aplica si el proveedor del T-1042 no responde a tiempo?" --modo grafo
+uv run main.py --agent react --docs --grafo "El T-1043 lleva 3 horas sin respuesta del proveedor, ¿ya incumplió su contrato?"
 ```
 
 Cada llamada imprime la respuesta y una línea gris con `proveedor · modelo · tokens in/out · latencia · costo`, y agrega una línea JSON por intento a `logs/llm_calls.jsonl`. Con `--prompt`, el log incluye `prompt_name` y `prompt_version`.
@@ -123,6 +128,14 @@ uv run scripts/compare_chunking.py --report reports/chunking.md
 # Modos de búsqueda sobre el golden set v3 (Clase 7); los modos con + llaman al LLM
 uv run scripts/eval_retrieval.py --modos vector bm25 hibrida --detalle
 uv run scripts/eval_retrieval.py --modos hibrida hibrida+rerank
+
+# Preguntas de varios saltos: recall@5 de las fuentes por modo (reto de la Clase 7)
+uv run scripts/eval_multihop.py --modos vector hibrida hibrida+rerank --report reports/multihop.md
+
+# Grafo de conocimiento en var/grafo.json (Clase 8): sin LLM, con LLM y sus comunidades
+uv run scripts/build_graph.py
+uv run scripts/build_graph.py --llm --comunidades
+uv run scripts/eval_multihop.py --modos hibrida grafo hibrida+grafo --detalle
 ```
 
 `compare_prompts.py` usa un solo proveedor sin fallback (el primario o el de `--provider`). `main.py --prompt` usa solo el primario si la cadena de fallbacks no se puede armar (por ejemplo, mientras `GroqProvider` esté pendiente).
@@ -147,6 +160,7 @@ uv run ruff format --check .
 | `data/proveedores.json` | 6 proveedores ficticios con servicio, SLA, estado y contacto (práctica de la Clase 3) |
 | `data/docs/` | 12 documentos ficticios de Acme Operaciones: 3 runbooks, 3 políticas, 3 contratos en PDF y 3 FAQ (Clase 6) |
 | `data/golden/rag_v1.jsonl` | 10 preguntas con su fuente esperada y 1 fuera del corpus, para `eval_retrieval.py` |
+| `data/golden/multihop_v1.jsonl` | 6 preguntas que necesitan 2 documentos, con sus `fuentes_esperadas`, para `eval_multihop.py` |
 
 ## Arquitectura
 
@@ -445,6 +459,31 @@ uv run main.py --agent react --docs --verbose "El T-1042 lleva 6 horas sin respu
 
 Costo por pregunta: `hibrida` cuesta lo mismo que `vector` (un embedding de la pregunta y una respuesta del LLM). `--reescribir` y `--rerank` agregan una llamada al LLM cada uno. En `eval_retrieval.py`, cada modo con `+` hace una llamada por paso y por pregunta.
 
+## Clase 8: GraphRAG con NetworkX
+
+Una pregunta como "el T-1043 lleva 3 horas sin respuesta, ¿ya incumplió su contrato?" necesita una cadena: el ticket dice el proveedor y el contrato del proveedor dice el plazo. Una búsqueda trae fragmentos parecidos a la pregunta; el grafo sigue relaciones. Esta clase construye un grafo de conocimiento del Agente Operador y lo usa como una búsqueda más y como herramienta del agente.
+
+| Pieza | Archivo | Idea clave |
+|---|---|---|
+| Grafo | `knowledge/graph.py` | Grafo de propiedades en un `MultiDiGraph` de NetworkX: nodos con tipo (ticket, proveedor, equipo, guardia, servicio, chunk) y relaciones con nombre. Cada relación guarda sus `fuentes`; se guarda como JSON en `var/grafo.json` |
+| Datos y reglas | `knowledge/graph_build.py` | Sin LLM: `tickets_db.json` (ticket → proveedor y equipo), `proveedores.json` y menciones en los chunks por regex y nombres conocidos. Las páginas de un contrato son de su proveedor por metadatos |
+| Extracción | `knowledge/extract.py` | El LLM extrae entidades y relaciones con un esquema cerrado; la resolución de entidades une nombres equivalentes y descarta tickets o proveedores inventados. Caché en `.cache/extracciones.json` |
+| Consulta | `knowledge/graph_search.py` | Semillas (las entidades de la pregunta), PageRank personalizado escrito a mano y como máximo 2 chunks por documento. En el `Retriever`, el grafo es un ranking más para la fusión RRF |
+| Herramienta | `tools/grafo.py` | `consultar_grafo(entidad)`: relaciones con su fuente y documentos donde aparece la entidad |
+
+El grafo no reemplaza a la búsqueda: sin una entidad en la pregunta no hay de dónde empezar a caminar. Mide antes de decidir con `eval_multihop.py` y `eval_retrieval.py`.
+
+### Comandos
+
+```bash
+uv run scripts/build_graph.py                       # datos y reglas, sin LLM
+uv run scripts/build_graph.py --llm --comunidades   # más extracción con el LLM (una llamada por chunk)
+uv run scripts/eval_multihop.py --modos bm25 grafo bm25+grafo --detalle
+uv run main.py --agent react --docs --grafo --verbose "¿Qué penalización aplica si el proveedor del T-1042 no da su primera respuesta a tiempo?"
+```
+
+Costo: construir el grafo sin LLM es gratis; con `--llm` es una llamada por chunk (54 con el corpus actual), una sola vez gracias a la caché. Consultar el grafo no llama a ninguna API.
+
 ## Retos
 
 ### Reto de la Clase 1: proveedor de respaldo y reporte
@@ -562,12 +601,30 @@ Opcional: migra el system prompt de `main.py` (busca `TODO(clase-2)`) a `prompts
 3. Corre el agente con `--docs` sobre las 6 preguntas y anota cuántas búsquedas hizo en cada una y si la respuesta es correcta.
 4. Escribe en `reports/multihop.md` qué preguntas fallan con una búsqueda, cuáles resuelve el agente buscando varias veces y por qué. En la Clase 8 comparamos estos números contra un grafo.
 
+### Práctica guiada de la Clase 8: qué conecta a dos entidades
+
+1. En `tests/test_consultar_grafo.py`, escribe un test: con el `ToolRunner`, `consultar_grafo` con `{"entidad": "T-1009", "hasta": "N3"}` regresa una `ruta` de 3 hechos: el T-1009 lo atiende Logística, y una política menciona a Logística y a la N3. Agrega otro: sin camino, `ruta` es una lista vacía. Deben fallar.
+2. En `knowledge/graph_search.py` (busca `TODO(clase-8)`), implementa `ruta(kg, origen, destino)`: semillas con `menciones`, camino con `nx.shortest_path` sobre la vista no dirigida y un hecho por salto con `hecho_entre`.
+3. En `ConsultarGrafoArgs` (`contracts/tool_schemas.py`), agrega `hasta`, opcional. En `tools/grafo.py`, si viene, agrega `"ruta"` a la salida.
+4. Corre el agente con `--verbose` y revisa la ruta en la traza:
+   ```bash
+   uv run main.py --agent react --grafo --verbose "¿Qué tiene que ver la Guardia N3 con el T-1009?"
+   ```
+
+### Reto para la Clase 9: ¿búsqueda o grafo?
+
+1. Escribe `data/golden/router_v1.jsonl` con las 20 preguntas con fuente de `rag_v3.jsonl` y las 6 de `multihop_v1.jsonl`. A cada una ponle `fuente_preferida`: `"busqueda"` o `"grafo"`, según cuál la resolvió mejor en tus evaluaciones (`eval_retrieval.py` y `eval_multihop.py` con `--modos hibrida grafo`).
+2. Escribe `scripts/eval_router.py` con una regla base `elegir_fuente(pregunta) -> str` (por ejemplo: si la pregunta nombra un ticket o un proveedor y pide un dato de otro documento, grafo; si no, búsqueda) y mide en cuántas de las 26 preguntas acierta.
+3. Calcula recall@5 de las 26 preguntas usando la fuente que eligió tu regla, y compáralo contra usar siempre `hibrida` y siempre `grafo`.
+4. Escribe en `reports/router.md` dónde falla tu regla. En la Clase 9 la reemplazamos por un router con el LLM en `knowledge/router.py`, que además decide cuándo consultar la memoria.
+
 ## Avisos
 
 - Gemini se consume con su [endpoint oficial compatible con OpenAI](https://ai.google.dev/gemini-api/docs/openai), que Google marca como **beta**. Desde junio de 2026 Google recomienda su API nativa, la [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview), para proyectos nuevos. Aquí usamos la compatible con OpenAI para que Gemini, Groq y Ollama compartan un mismo adaptador base. Cambiar a la API nativa solo requiere otro adaptador en `core/providers.py`; el resto del código no se toca.
 - En el free tier de Gemini, `compare_prompts.py` puede recibir errores 429 (límite por minuto). El script reintenta con esperas de hasta ~1 minuto; si un ticket aun así falla, se reporta como error del proveedor y no como fuera de formato.
 - El validador `caida_es_alta` de `TicketClassification` es una **simplificación didáctica**: busca la palabra "caíd" en el texto. Una regla real usaría un campo explícito.
 - Los embeddings se registran en el log con `cost_usd: 0`: `core/pricing.py` solo tiene precios de generación de texto.
+- El grafo vive en la memoria de un proceso y en un JSON: sirve para este corpus y para prototipos. Cuando el grafo crece, cambia seguido o lo consultan varios servicios, ese papel lo hace una base de grafos como Neo4j, que guarda el mismo modelo de nodos y relaciones con propiedades y se consulta con Cypher.
 - `BM25Index` vive en memoria y se arma con todos los chunks del índice cada vez que se crea un `Retriever`. Con los 54 chunks del corpus tarda milisegundos; con cientos de miles de chunks, ese papel lo hace un motor de búsqueda (OpenSearch, Elasticsearch o la búsqueda de texto completo de Postgres).
 - Los precios en `core/pricing.py` son **ilustrativos**. Revisa la tabla vigente de cada proveedor antes de tomar decisiones con ellos.
 - **Nunca subas tu `.env`** al repositorio. Ya está en `.gitignore`; si alguna vez lo subes por error, rota tus llaves.

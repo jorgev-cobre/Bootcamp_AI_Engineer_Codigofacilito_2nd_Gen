@@ -19,6 +19,8 @@ Uso:
     uv run main.py --rag "¿Qué pasó con el T-1016?" --modo hibrida
     uv run main.py --rag "¿Cuánto tardan los de pagos en contestar?" --modo hibrida --rerank
     uv run main.py --agent react --docs "El T-1042 lleva 6 horas sin respuesta: ¿escalo?"
+    uv run main.py --rag "¿Qué penalización tiene el proveedor del T-1042?" --modo grafo
+    uv run main.py --agent react --docs --grafo "El T-1043 lleva 3 horas: ¿ya incumplió?"
 """
 
 from __future__ import annotations
@@ -47,6 +49,7 @@ from core.llm_client import LLMClient, ToolCall
 from prompting import PromptKit, PromptNotFoundError
 
 if TYPE_CHECKING:
+    from knowledge.graph import KnowledgeGraph
     from knowledge.store import VectorStore
 
 # --demo: solo Gemini, sin fallbacks. Funciona aunque GroqProvider siga con su TODO.
@@ -67,7 +70,7 @@ TOOL_LOG_PATH = Path(__file__).parent / "logs" / "tool_calls.jsonl"
 # Clase 6: RAG sobre data/docs, indexados con scripts/ingest_docs.py.
 RAG_K = 5
 # Clase 7: los modos de knowledge/retrieval.py (aquí sin importarlo: carga ChromaDB).
-RAG_MODOS = ("vector", "bm25", "hibrida")
+RAG_MODOS = ("vector", "bm25", "hibrida", "grafo", "hibrida+grafo")
 
 # Herramientas disponibles en el modo --tools.
 TOOLS = [BUSCAR_TICKET, CONSULTAR_PROVEEDOR]
@@ -170,7 +173,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--modo",
         choices=RAG_MODOS,
         default="vector",
-        help="Con --rag, cómo buscar: vector (Clase 6), bm25 o hibrida (Clase 7).",
+        help="Con --rag, cómo buscar: vector (Clase 6), bm25 o hibrida (Clase 7), grafo (Clase 8).",
     )
     parser.add_argument(
         "--reescribir",
@@ -187,10 +190,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Con --agent, agrega buscar_documentos: búsqueda híbrida en data/docs (Clase 7).",
     )
+    parser.add_argument(
+        "--grafo",
+        action="store_true",
+        help="Con --agent, agrega consultar_grafo: relaciones de var/grafo.json (Clase 8).",
+    )
     args = parser.parse_args(argv)
     if args.rag is not None:
         others = (args.prompt, args.ticket, args.agent, args.prompt_name, args.demo)
-        if any(others) or args.structured or args.tools or args.docs:
+        if any(others) or args.structured or args.tools or args.docs or args.grafo:
             parser.error("--rag recibe la pregunta y no se combina con otros modos.")
         return args
     if args.k is not None or (args.embedder is not None and not args.docs):
@@ -199,8 +207,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--tipo y --proveedor requieren --rag.")
     if args.modo != "vector" or args.reescribir or args.rerank:
         parser.error("--modo, --reescribir y --rerank requieren --rag.")
-    if args.docs and (not args.agent or args.mcp):
-        parser.error("--docs requiere --agent y no se combina con --mcp.")
+    if (args.docs or args.grafo) and (not args.agent or args.mcp):
+        parser.error("--docs y --grafo requieren --agent y no se combinan con --mcp.")
     if args.verify and not args.agent:
         parser.error("--verify requiere --agent.")
     if args.mcp and not args.agent:
@@ -303,6 +311,7 @@ def run_agent(
     rol: str = "operador",
     docs: bool = False,
     embedder: str | None = None,
+    grafo: bool = False,
 ) -> int:
     from agents import PlanAndExecute, ReActAgent, verify_and_revise
     from agents.tools import ToolRunner
@@ -353,9 +362,17 @@ def run_agent(
             except (LookupError, EmbeddingMismatch) as e:
                 return fail(str(e))
             tools.append(buscar_documentos_tool(Retriever(store, modo="hibrida")))
+        if grafo:
+            # Clase 8: relaciones del grafo de conocimiento.
+            from tools.grafo import consultar_grafo_tool
+
+            try:
+                tools.append(consultar_grafo_tool(open_graph()))
+            except LookupError as e:
+                return fail(str(e))
         runner = ToolRunner(tools, rol=rol, log_path=TOOL_LOG_PATH, request_id=uuid.uuid4().hex)
-        con_docs = " + documentos" if docs else ""
-        print(f"{GRAY}herramientas: locales{con_docs} · rol {rol}{RESET}")
+        etiqueta = (" + documentos" if docs else "") + (" + grafo" if grafo else "")
+        print(f"{GRAY}herramientas: locales{etiqueta} · rol {rol}{RESET}")
         result = agent_cls(client, tools, on_event=on_event, runner=runner).run(question)
     respuesta, checked = result.respuesta, None
     llamadas, tokens, cost_usd = result.llamadas, result.tokens, result.cost_usd
@@ -441,14 +458,25 @@ def open_docs_store(embedder: str | None) -> VectorStore:
     return store
 
 
+def open_graph() -> KnowledgeGraph:
+    """Carga var/grafo.json. Lanza `LookupError` si no se ha construido."""
+    from knowledge.graph import GRAPH_PATH, KnowledgeGraph
+
+    if not GRAPH_PATH.exists():
+        raise LookupError(f"no hay grafo en {GRAPH_PATH}; corre `uv run scripts/build_graph.py`.")
+    return KnowledgeGraph.load(GRAPH_PATH)
+
+
 def run_rag(args: argparse.Namespace) -> int:
     """`--rag`: busca en el índice, responde con citas e imprime las fuentes (S43)."""
     from knowledge.rag import UMBRAL, answer
     from knowledge.retrieval import Retriever
     from knowledge.store import EmbeddingMismatch, build_where
 
+    base, *pasos = args.modo.split("+")
     try:
         store = open_docs_store(args.embedder)
+        grafo = open_graph() if "grafo" in (base, *pasos) else None
     except (LookupError, EmbeddingMismatch) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2
@@ -464,10 +492,11 @@ def run_rag(args: argparse.Namespace) -> int:
             # Clase 7: sin umbral de distancia; deciden el reranker o el modelo.
             retriever = Retriever(
                 store,
-                modo=args.modo,
+                modo=base,
                 client=client,
                 reescribir=args.reescribir,
                 rerank=args.rerank,
+                grafo=grafo,
             )
             result = answer(
                 client, retriever, args.rag, k=args.k or RAG_K, where=where, umbral=None
@@ -544,6 +573,7 @@ def main(argv: list[str] | None = None) -> int:
             rol=args.rol,
             docs=args.docs,
             embedder=args.embedder,
+            grafo=args.grafo,
         )
 
     if args.structured or args.tools:
