@@ -123,6 +123,9 @@ uv run scripts/compare_chunking.py --report reports/chunking.md
 # Modos de búsqueda sobre el golden set v3 (Clase 7); los modos con + llaman al LLM
 uv run scripts/eval_retrieval.py --modos vector bm25 hibrida --detalle
 uv run scripts/eval_retrieval.py --modos hibrida hibrida+rerank
+
+# Preguntas de varios saltos: recall@5 de las fuentes por modo (reto de la Clase 7)
+uv run scripts/eval_multihop.py --modos vector hibrida hibrida+rerank --report reports/multihop.md
 ```
 
 `compare_prompts.py` usa un solo proveedor sin fallback (el primario o el de `--provider`). `main.py --prompt` usa solo el primario si la cadena de fallbacks no se puede armar (por ejemplo, mientras `GroqProvider` esté pendiente).
@@ -147,6 +150,7 @@ uv run ruff format --check .
 | `data/proveedores.json` | 6 proveedores ficticios con servicio, SLA, estado y contacto (práctica de la Clase 3) |
 | `data/docs/` | 12 documentos ficticios de Acme Operaciones: 3 runbooks, 3 políticas, 3 contratos en PDF y 3 FAQ (Clase 6) |
 | `data/golden/rag_v1.jsonl` | 10 preguntas con su fuente esperada y 1 fuera del corpus, para `eval_retrieval.py` |
+| `data/golden/multihop_v1.jsonl` | 6 preguntas que necesitan 2 documentos, con sus `fuentes_esperadas`, para `eval_multihop.py` |
 
 ## Arquitectura
 
