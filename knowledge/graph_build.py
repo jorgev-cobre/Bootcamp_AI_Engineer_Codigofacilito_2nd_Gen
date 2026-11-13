@@ -6,7 +6,9 @@
                         y chunk —contrato_de→ proveedor en las páginas de un contrato
 
 Las reglas solo encuentran lo que ya conocen: IDs de ticket, nombres de proveedores y
-equipos, y guardias N1 a N3. Lo demás (servicios, quién hospeda qué) lo extrae el LLM.
+equipos, y guardias N1 a N3. Lo demás (servicios, quién hospeda qué) lo extrae el LLM con
+knowledge/extract.py, antes de las reglas: así las reglas también encuentran los
+servicios nuevos en los demás chunks.
 """
 
 from __future__ import annotations
@@ -17,11 +19,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from knowledge.chunking import CHUNK_TOKENS, chunk_file
+from knowledge.extract import ExtractionCache, add_extraccion, extraer
 from knowledge.graph import KnowledgeGraph, clave, nodo_id
 from knowledge.ingest import PROVEEDORES_PATH, corpus_files, load_path
 from knowledge.rag import etiqueta
 
 if TYPE_CHECKING:
+    from core.llm_client import LLMClient
     from knowledge.chunking import Chunk
 
 TICKETS_PATH = Path(__file__).resolve().parents[1] / "data" / "tickets_db.json"
@@ -89,13 +93,18 @@ def load_chunks(root: Path, max_tokens: int = CHUNK_TOKENS) -> list[Chunk]:
     return chunks
 
 
-def build_graph(chunks: list[Chunk]) -> KnowledgeGraph:
-    """Datos estructurados, un nodo por chunk y menciones por reglas."""
+def build_graph(
+    chunks: list[Chunk], client: LLMClient | None = None, cache: ExtractionCache | None = None
+) -> KnowledgeGraph:
+    """Datos estructurados, chunks, extracción con el LLM (si hay `client`) y reglas."""
     kg = KnowledgeGraph()
     tickets = json.loads(TICKETS_PATH.read_text(encoding="utf-8"))
     proveedores = json.loads(PROVEEDORES_PATH.read_text(encoding="utf-8"))
     from_datos(kg, tickets, proveedores)
     nodos = [add_chunk(kg, chunk) for chunk in chunks]
+    if client is not None:
+        for nodo, chunk in zip(nodos, chunks, strict=True):
+            add_extraccion(kg, nodo, extraer(client, kg, chunk.texto, cache))
     for nodo, chunk in zip(nodos, chunks, strict=True):
         add_menciones(kg, nodo, chunk.texto)
     return kg
