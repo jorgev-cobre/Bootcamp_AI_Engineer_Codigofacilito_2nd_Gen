@@ -110,6 +110,16 @@ class BuscarDocumentosArgs(BaseModel):
     )
 
 
+class ConsultarGrafoArgs(BaseModel):
+    entidad: str = Field(
+        min_length=2,
+        description=(
+            "La entidad por la que preguntas: un ID de ticket (T-1043), un proveedor "
+            "(NubeHost), un equipo (Finanzas), una guardia (N2) o un servicio"
+        ),
+    )
+
+
 BUSCAR_TICKET = ToolSpec(
     name="buscar_ticket",
     description=(
